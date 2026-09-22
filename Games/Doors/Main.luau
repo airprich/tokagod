@@ -21,6 +21,10 @@ local LiveModifiers = ReplicatedStorage:FindFirstChild("LiveModifiers")
 local CurrentRooms = workspace:FindFirstChild("CurrentRooms")
 local CollisionPart
 
+local RemotesFolder = ReplicatedStorage:FindFirstChild("RemotesFolder")
+    or ReplicatedStorage:FindFirstChild("EntityInfo")
+    or ReplicatedStorage:FindFirstChild("Bricks")
+
 local Character, Humanoid, RootPart
 
 Functions.Notify = function(Settings)
@@ -163,6 +167,10 @@ Toggles.SpeedBoostToggle:OnChanged(function(Value)
     if Humanoid then
         Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + (Value and Options.SpeedBoost.Value or 0)
     end
+    -- Сообщаем серверу
+    if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+        RemotesFolder.Crouch:FireServer(false, true)
+    end
     Functions.Notify({
         Title = "Speed Boost",
         Body = Value and "Включено" or "Выключено"
@@ -173,11 +181,17 @@ Options.SpeedBoost:OnChanged(function(Value)
     if Toggles.SpeedBoostToggle.Value and Humanoid then
         Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Value
     end
+    -- Сообщаем серверу, что скорость изменилась (обход античита)
+    if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+        RemotesFolder.Crouch:FireServer(false, true)
+    end
 end)
 
-RunService.RenderStepped:Connect(function()
-    if Toggles.SpeedBoostToggle.Value and Humanoid then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
+task.spawn(function()
+    while task.wait(0.1) do
+        if Toggles.SpeedBoostToggle.Value and Humanoid then
+            Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
+        end
     end
 end)
 

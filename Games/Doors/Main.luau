@@ -359,24 +359,29 @@ end
 
 local Settings_Misc = Tabs.Settings:AddLeftGroupbox("Misc")
 
-Settings_Misc:AddButton({
-    Text = "Unload Script",
-    Tooltip = "Полностью выгружает tokagod и очищает все соединения",
-    DoubleClick = true,
-    Risky = true,
-    Func = function()
-        if Library and Library.Unload then
-            Library:Unload()
-        end
-        if shared then
-            shared.tokagod = nil
-        end
-        if getgenv then
-            getgenv().tokagod = nil
-        end
-        print("[tokagod] Выгружен")
+Library:OnUnload(function()
+    if Toggles.SpeedBoostToggle then
+        pcall(function() Toggles.SpeedBoostToggle:SetValue(false) end)
     end
-})
+    if Toggles.FlyToggle then
+        pcall(function() Toggles.FlyToggle:SetValue(false) end)
+    end
+    if Toggles.NoclipToggle then
+        pcall(function() Toggles.NoclipToggle:SetValue(false) end)
+    end
+    if StopFly then pcall(StopFly) end
+    if StopNoclip then pcall(StopNoclip) end
+
+    -- Восстанавливаем скорость
+    if Humanoid then
+        pcall(function() Humanoid.WalkSpeed = 15 end)
+    end
+    if Humanoid then
+        pcall(function() Humanoid.PlatformStand = false end)
+    end
+
+    print("[tokagod] Функции выключены")
+end)
 
 -- ============================================
 -- ЗАГРУЗКА

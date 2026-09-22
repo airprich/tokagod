@@ -112,7 +112,6 @@ Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
 local BASE_WALKSPEED = 16
 local originalWalkSpeed = nil
 
--- Функция которая срабатывает при изменении слайдера ИЛИ тумблера
 local function ApplySpeedBoost()
     if not Humanoid then return end
 
@@ -132,7 +131,6 @@ local function ApplySpeedBoost()
     end
 end
 
--- Тумблер включён/выключен
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
     ApplySpeedBoost()
     Functions.Notify({
@@ -141,142 +139,8 @@ Toggles.SpeedBoostToggle:OnChanged(function(Value)
     })
 end)
 
--- Слайдер двигается
 Options.SpeedBoost:OnChanged(function(Value)
     ApplySpeedBoost()
-end)
-
--- ============================================
--- ЛОГИКА FLY
--- ============================================
-
-local flyConnection = nil
-local flyBodyVelocity = nil
-local flyBodyGyro = nil
-
-local function StartFly()
-    if not Character or not RootPart or not Humanoid then return end
-    if flyConnection then return end
-
-    flyBodyVelocity = Instance.new("BodyVelocity")
-    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyVelocity.P = 1250
-    flyBodyVelocity.Parent = RootPart
-
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyGyro.P = 1250
-    flyBodyGyro.CFrame = RootPart.CFrame
-    flyBodyGyro.Parent = RootPart
-
-    Humanoid.PlatformStand = true
-
-    local UserInputService = game:GetService("UserInputService")
-    local Camera = Workspace.CurrentCamera
-
-    flyConnection = RunService.RenderStepped:Connect(function()
-        if not RootPart or not Humanoid then return end
-
-        local moveDirection = Humanoid.MoveDirection
-        local cameraCFrame = Camera.CFrame
-
-        local forward = cameraCFrame.LookVector
-        local right = cameraCFrame.RightVector
-
-        local direction = Vector3.zero
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            direction = direction + forward
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            direction = direction - forward
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            direction = direction - right
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            direction = direction + right
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            direction = direction + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-            direction = direction - Vector3.new(0, 1, 0)
-        end
-
-        if direction.Magnitude > 0 then
-            direction = direction.Unit
-        end
-
-        flyBodyVelocity.Velocity = direction * Options.FlySpeed.Value
-        flyBodyGyro.CFrame = cameraCFrame
-    end)
-end
-
-local function StopFly()
-    if flyConnection then
-        flyConnection:Disconnect()
-        flyConnection = nil
-    end
-
-    if flyBodyVelocity then
-        flyBodyVelocity:Destroy()
-        flyBodyVelocity = nil
-    end
-
-    if flyBodyGyro then
-        flyBodyGyro:Destroy()
-        flyBodyGyro = nil
-    end
-
-    if Humanoid then
-        Humanoid.PlatformStand = false
-    end
-end
-
-Toggles.FlyToggle:OnChanged(function(Value)
-    if Value then
-        StartFly()
-    else
-        StopFly()
-    end
-end)
-
-Options.FlySpeed:OnChanged(function(Value)
-    -- Скорость применяется в RenderStepped, ничего не нужно
-end)
-
--- ============================================
--- ЛОГИКА NOCLIP
--- ============================================
-
-local noclipConnection = nil
-
-local function StartNoclip()
-    if noclipConnection then return end
-    noclipConnection = RunService.Stepped:Connect(function()
-        if not Character then return end
-        for _, part in ipairs(Character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-    end)
-end
-
-local function StopNoclip()
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
-    end
-end
-
-Toggles.NoclipToggle:OnChanged(function(Value)
-    if Value then
-        StartNoclip()
-    else
-        StopNoclip()
-    end
 end)
 
 -- ============================================

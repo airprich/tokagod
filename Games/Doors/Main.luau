@@ -404,44 +404,65 @@ local ObjectiveLabels = {
 local function ClassifyObject(Object)
     local Name = Object.Name
 
-    -- Door — вешаем на Door.Door, а не на весь Model
+    -- Door — берём структуру из Abysall (HighlightModel + weld к Door.Door)
     if Name == "Door" and Object:IsA("Model") and Object.Parent and tonumber(Object.Parent.Name) then
-        local highlight = Object:FindFirstChild("tokagod_Highlight")
-        if not highlight then
-            highlight = Instance.new("Part")
-            highlight.Name = "tokagod_Highlight"
-            highlight.Anchored = true
-            highlight.CanCollide = false
-            highlight.CanTouch = false
-            highlight.CanQuery = false
-            highlight.Transparency = 1
-            highlight.Massless = true
-            highlight.Parent = Object
+        local existing = Object:FindFirstChild("HighlightModel")
+        local target
 
-            task.spawn(function()
-                while highlight.Parent do
-                    local min = Vector3.new(math.huge, math.huge, math.huge)
-                    local max = Vector3.new(-math.huge, -math.huge, -math.huge)
-                    for _, part in ipairs(Object:GetDescendants()) do
-                        if part:IsA("BasePart") and part ~= highlight and part.Name == "Door" then
-                            local cf, size = part.CFrame, part.Size
-                            for x = -1, 1, 2 do
-                                for y = -1, 1, 2 do
-                                    for z = -1, 1, 2 do
-                                        local corner = (cf * CFrame.new(size.X/2*x, size.Y/2*y, size.Z/2*z)).Position
-                                        min = Vector3.new(math.min(min.X, corner.X), math.min(min.Y, corner.Y), math.min(min.Z, corner.Z))
-                                        max = Vector3.new(math.max(max.X, corner.X), math.max(max.Y, corner.Y), math.max(max.Z, corner.Z))
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    if min.X ~= math.huge then
-                        highlight.Size = max - min
-                        highlight.CFrame = CFrame.new((min + max) / 2)
-                    end
-                    task.wait(0.5)
+        if existing and existing:FindFirstChild("HighlightPart") then
+            target = existing.HighlightPart
+        else
+            local DoorParts = {}
+            for _, Child in Object:GetChildren() do
+                if Child.Name == "Door" and Child:IsA("BasePart") then
+                    table.insert(DoorParts, Child)
                 end
+            end
+
+            if #DoorParts == 2 then
+                local HighlightModel = Instance.new("Model", Object)
+                HighlightModel.Name = "HighlightModel"
+                local hum = Instance.new("Humanoid", HighlightModel)
+                hum.Name = "HighlightHumanoid"
+                HighlightModel:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
+
+                for _, DoorPart in DoorParts do
+                    local HP = Instance.new("Part", HighlightModel)
+                    HP.Transparency = 0.999
+                    HP.Size = DoorPart.Size
+                    HP.CanCollide = false
+                    HP.CFrame = DoorPart.CFrame
+                    HP.Name = "HighlightPart"
+                    HP.Material = Enum.Material.Plastic
+                    HP:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
+                    local W = Instance.new("WeldConstraint", HP)
+                    W.Part0 = HP W.Part1 = DoorPart W.Enabled = true
+                end
+
+                target = HighlightModel
+            else
+                local Root = Object:WaitForChild("Door", 9e9)
+                if Root and Root:IsA("BasePart") then
+                    local HP = Instance.new("Part", Object)
+                    HP.Transparency = 0.999
+                    HP.Size = Root.Size
+                    HP.CanCollide = false
+                    HP.CFrame = Root.CFrame
+                    HP.Name = "HighlightPart"
+                    HP.Material = Enum.Material.Plastic
+                    HP:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
+                    local W = Instance.new("WeldConstraint", HP)
+                    W.Part0 = HP W.Part1 = Root W.Enabled = true
+                    Instance.new("Humanoid", Object).Name = "HighlightHumanoid"
+                    target = HP
+                else
+                    return nil, nil, nil
+                end
+            end
+        end
+
+        return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), target
+    end
             end)
         end
 

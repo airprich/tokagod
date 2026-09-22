@@ -83,8 +83,8 @@ end
 -- ============================================
 
 local Window = Library:CreateWindow({
-    Title = "??",
-    Footer = "dsc.gg/????",
+    Title = "????",
+    Footer = "dsc.gg/?????",
     NotifySide = "Right",
     ShowCustomCursor = false,
     AutoShow = true,

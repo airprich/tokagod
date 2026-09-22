@@ -1,11 +1,16 @@
 -- tokagod Interface
 -- Obsidian + SaveManager + ThemeManager
 
-local BaseUrl = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/"
+local BaseUrl = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 
-local Obsidian = loadstring(game:HttpGet(BaseUrl .. "Obsidian.lua"))()
-local SaveManager = loadstring(game:HttpGet(BaseUrl .. "Addons/SaveManager.lua"))()
-local ThemeManager = loadstring(game:HttpGet(BaseUrl .. "Addons/ThemeManager.lua"))()
+-- Главная библиотека
+local Obsidian = loadstring(game:HttpGet(BaseUrl .. "Library.lua"))()
+
+-- SaveManager (в папке addons)
+local SaveManager = loadstring(game:HttpGet(BaseUrl .. "addons/SaveManager.lua"))()
+
+-- ThemeManager (в папке addons)
+local ThemeManager = loadstring(game:HttpGet(BaseUrl .. "addons/ThemeManager.lua"))()
 
 return {
     Library = Obsidian,

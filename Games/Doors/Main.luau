@@ -15,6 +15,12 @@ local Toggles = Library.Toggles
 local Options = Library.Options
 local Functions = {}
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Floor = ReplicatedStorage:WaitForChild("GameData"):WaitForChild("Floor").Value
+local LiveModifiers = ReplicatedStorage:FindFirstChild("LiveModifiers")
+local CurrentRooms = workspace:FindFirstChild("CurrentRooms")
+local CollisionPart
+
 local Character, Humanoid, RootPart
 
 Functions.Notify = function(Settings)
@@ -110,6 +116,19 @@ Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
 -- ЛОГИКА SPEED BOOST
 -- ============================================
 
+Functions.IsCrouching = function()
+    if not Character then return false end
+    if Floor == "Fools" or Floor == "OldHotel" then
+        return Character:GetAttribute("Crouching") == true
+    end
+    return CollisionPart and CollisionPart.CollisionGroup == "PlayerCrouching" or false
+end
+
+Functions.GetInjuriesSpeed = function()
+    if not Humanoid then return 0 end
+    return 0.075 * (Humanoid.MaxHealth - Humanoid.Health)
+end
+
 Functions.GetCurrentSpeed = function()
     local Speed = 15
     if not Character or not Humanoid then return Speed end
@@ -117,13 +136,24 @@ Functions.GetCurrentSpeed = function()
     Speed += Character:GetAttribute("SpeedBoost") or 0
     Speed += Character:GetAttribute("SpeedBoostBehind") or 0
     Speed += Character:GetAttribute("SpeedBoostExtra") or 0
+    Speed += (Floor == "Party" and 10 or 0)
 
-    local LiveModifiers = game:GetService("ReplicatedStorage"):FindFirstChild("LiveModifiers")
     if LiveModifiers then
         Speed += (LiveModifiers:FindFirstChild("PlayerFast") and 3 or 0)
         Speed += (LiveModifiers:FindFirstChild("PlayerFaster") and 6 or 0)
         Speed += (LiveModifiers:FindFirstChild("PlayerFastest") and 20 or 0)
         Speed -= (LiveModifiers:FindFirstChild("PlayerSlow") and 3 or 0)
+        Speed -= (LiveModifiers:FindFirstChild("PlayerSlowHealth") and Functions.GetInjuriesSpeed() or 0)
+    end
+
+    if Functions.IsCrouching() then
+        if LiveModifiers and LiveModifiers:FindFirstChild("PlayerCrouchSlow") then
+            Speed -= 8
+        elseif LiveModifiers and LiveModifiers:FindFirstChild("PlayerSlow") then
+            Speed -= 8
+        else
+            Speed -= 5
+        end
     end
 
     return Speed
@@ -282,6 +312,7 @@ local function OnCharacterAdded(newCharacter)
     Character = newCharacter
     Humanoid = newCharacter:WaitForChild("Humanoid", 10)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
+    CollisionPart = newCharacter:FindFirstChild("CollisionPart") or newCharacter:FindFirstChild("Collision")
 
     -- Speed Boost — просто применяем через RenderStepped loop
     if Toggles.SpeedBoostToggle.Value and Humanoid then

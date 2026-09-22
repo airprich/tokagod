@@ -302,12 +302,6 @@ local function OnCharacterAdded(newCharacter)
     end
 end
 
-if LocalPlayer.Character then
-    OnCharacterAdded(LocalPlayer.Character)
-end
-
-LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
-
 -- ============================================
 -- SaveManager / ThemeManager
 -- ============================================

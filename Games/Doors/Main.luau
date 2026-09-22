@@ -406,10 +406,46 @@ local function ClassifyObject(Object)
 
     -- Door — вешаем на Door.Door, а не на весь Model
     if Name == "Door" and Object:IsA("Model") and Object.Parent and tonumber(Object.Parent.Name) then
-        local DoorPart = Object:FindFirstChild("Door")
-        if DoorPart and DoorPart:IsA("BasePart") then
-            return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), DoorPart
+        local highlight = Object:FindFirstChild("tokagod_Highlight")
+        if not highlight then
+            highlight = Instance.new("Part")
+            highlight.Name = "tokagod_Highlight"
+            highlight.Anchored = true
+            highlight.CanCollide = false
+            highlight.CanTouch = false
+            highlight.CanQuery = false
+            highlight.Transparency = 1
+            highlight.Massless = true
+            highlight.Parent = Object
+
+            task.spawn(function()
+                while highlight.Parent do
+                    local min = Vector3.new(math.huge, math.huge, math.huge)
+                    local max = Vector3.new(-math.huge, -math.huge, -math.huge)
+                    for _, part in ipairs(Object:GetDescendants()) do
+                        if part:IsA("BasePart") and part ~= highlight and part.Name == "Door" then
+                            local cf, size = part.CFrame, part.Size
+                            for x = -1, 1, 2 do
+                                for y = -1, 1, 2 do
+                                    for z = -1, 1, 2 do
+                                        local corner = (cf * CFrame.new(size.X/2*x, size.Y/2*y, size.Z/2*z)).Position
+                                        min = Vector3.new(math.min(min.X, corner.X), math.min(min.Y, corner.Y), math.min(min.Z, corner.Z))
+                                        max = Vector3.new(math.max(max.X, corner.X), math.max(max.Y, corner.Y), math.max(max.Z, corner.Z))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if min.X ~= math.huge then
+                        highlight.Size = max - min
+                        highlight.CFrame = CFrame.new((min + max) / 2)
+                    end
+                    task.wait(0.5)
+                end
+            end)
         end
+
+        return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), highlight
     end
 
     if ObjectiveLabels[Name] then

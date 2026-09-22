@@ -350,7 +350,7 @@ local function OnCharacterAdded(newCharacter)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
     CollisionPart = newCharacter:FindFirstChild("CollisionPart") or newCharacter:FindFirstChild("Collision")
 
-    -- Speed Boost — просто применяем через RenderStepped loop
+    -- Speed Boost — применяем сразу
     if Toggles.SpeedBoostToggle.Value and Humanoid then
         Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
     end
@@ -365,23 +365,27 @@ local function OnCharacterAdded(newCharacter)
     if Toggles.NoclipToggle.Value then
         StartNoclip()
     end
-end
 
--- Запускаем обработку персонажа
-if LocalPlayer.Character then
-    OnCharacterAdded(LocalPlayer.Character)
-end
-LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
-
-    -- Античит-байпас через лестницу
-    local AnticheatDisabler = Character:GetAttributeChangedSignal("Climbing"):Connect(function()
-        if Character:GetAttribute("Climbing") == true and Toggles.DisableAnticheat.Value and not Globals.AnticheatDisabled then
+    -- Античит-байпас через лестницу (ВНУТРИ OnCharacterAdded)
+    Character:GetAttributeChangedSignal("Climbing"):Connect(function()
+        if Character
+            and Character:GetAttribute("Climbing") == true
+            and Toggles.DisableAnticheat
+            and Toggles.DisableAnticheat.Value
+            and not Globals.AnticheatDisabled
+        then
             task.wait(0.25)
             Character:SetAttribute("Climbing", false)
             Functions.Notify({ Title = "Античит отключён", Body = "Теперь Speed Boost работает" })
             Globals.AnticheatDisabled = true
         end
     end)
+end
+
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
 
 -- ============================================
 -- SaveManager / ThemeManager

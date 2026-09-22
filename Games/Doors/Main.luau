@@ -434,7 +434,9 @@ local function UpdateVelocityManipulation()
 end
 
 Toggles.VelocityManipulationToggle:OnChanged(UpdateVelocityManipulation)
-Options.VelocityManipulationMode:OnChanged(UpdateVelocityManipulation)
+if Options.VelocityManipulationMode then
+    Options.VelocityManipulationMode:OnChanged(UpdateVelocityManipulation)
+end
 
 Functions.ConnectSignal(RunService.RenderStepped, UpdateVelocityManipulation)
 

@@ -404,48 +404,52 @@ local ObjectiveLabels = {
 local function ClassifyObject(Object)
     local Name = Object.Name
 
+    -- Door — вешаем на Door.Door, а не на весь Model
     if Name == "Door" and Object:IsA("Model") and Object.Parent and tonumber(Object.Parent.Name) then
-        return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1)
+        local DoorPart = Object:FindFirstChild("Door")
+        if DoorPart and DoorPart:IsA("BasePart") then
+            return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), DoorPart
+        end
     end
 
     if ObjectiveLabels[Name] then
-        return "Objectives", ObjectiveLabels[Name]
+        return "Objectives", ObjectiveLabels[Name], Object
     end
 
     if HidingSpotLabels[Name] then
-        return "HidingSpots", HidingSpotLabels[Name]
+        return "HidingSpots", HidingSpotLabels[Name], Object
     end
     if typeof(Name) == "string" and string.find(string.lower(Name), "hidingspot") then
-        return "HidingSpots", "Hiding Spot"
+        return "HidingSpots", "Hiding Spot", Object
     end
 
     if ChestLabels[Name] then
-        return "Chests", ChestLabels[Name]
+        return "Chests", ChestLabels[Name], Object
     end
 
     if ItemNames[Name] and Object:FindFirstChild("ModulePrompt") then
-        return "Items", ItemNames[Name]
+        return "Items", ItemNames[Name], Object
     end
     if Name == "Green_Herb" then
-        return "Items", "Green Herb"
+        return "Items", "Green Herb", Object
     end
 
     if Name == "GoldPile" and Object:GetAttribute("GoldValue") then
-        return "Currency", "Gold Pile [" .. Object:GetAttribute("GoldValue") .. "]"
+        return "Currency", "Gold Pile [" .. Object:GetAttribute("GoldValue") .. "]", Object
     end
     if Name == "StardustPickup" then
-        return "Currency", "Stardust Pile"
+        return "Currency", "Stardust Pile", Object
     end
 
     if Name == "Ladder" then
-        return "Ladders", "Ladder"
+        return "Ladders", "Ladder", Object
     end
 
     if EntityAliases[Name] then
-        return "Entities", EntityAliases[Name]
+        return "Entities", EntityAliases[Name], Object
     end
 
-    return nil, nil
+    return nil, nil, nil
 end
 
 local ESPToggleMap = {

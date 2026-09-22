@@ -123,6 +123,34 @@ Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
     Text = "Noclip", Default = "N", Mode = "Toggle", SyncToggleState = true
 })
 
+Groupboxes.General_Character:AddDivider()
+
+Groupboxes.General_Character:AddToggle("PositionSpoof", {
+    Text = "Position Spoof",
+    Default = false,
+    Tooltip = "Телепортирует хитбокс под пол — античит не ловит скорость"
+})
+
+Toggles.PositionSpoof:AddKeyPicker("PositionSpoofKeybind", {
+    Text = "Position Spoof", Default = "B", Mode = "Toggle", SyncToggleState = true
+})
+
+Groupboxes.General_Character:AddToggle("VelocityManipulationToggle", {
+    Text = "Velocity Manipulation",
+    Default = false,
+    Tooltip = "Медленно двигает тебя вперёд через физику — обход античита"
+})
+
+Toggles.VelocityManipulationToggle:AddKeyPicker("VelocityManipulationKeybind", {
+    Text = "Velocity Manipulation", Default = "V", Mode = "Toggle", SyncToggleState = true
+})
+
+Groupboxes.General_Character:AddDropdown("VelocityManipulationMode", {
+    Text = "Manipulation Method",
+    Values = { "Velocity", "Pivot" },
+    Default = 1,
+})
+
 -- ============================================
 -- ЛОГИКА SPEED BOOST
 -- ============================================
@@ -199,6 +227,60 @@ task.spawn(function()
         if Toggles.SpeedBoostToggle.Value and Humanoid then
             Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
         end
+    end
+end)
+
+-- ============================================
+-- POSITION SPOOF + VELOCITY MANIPULATION
+-- ============================================
+
+Globals.ManipulateBody = Instance.new("BodyVelocity")
+Globals.ManipulateBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+
+Toggles.PositionSpoof:OnChanged(function(Value)
+    if Floor == "Fools" or Floor == "OldHotel" then return end
+    if not RootPart or not Humanoid then return end
+    if Value then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            RemotesFolder.Crouch:FireServer(true, true)
+        end
+    else
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    -- Position Spoof — постоянное применение
+    if Toggles.PositionSpoof.Value and RootPart and Humanoid then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            RemotesFolder.Crouch:FireServer(true, true)
+        end
+    end
+
+    -- Velocity Manipulation
+    if Toggles.VelocityManipulationToggle.Value and RootPart then
+        if Options.VelocityManipulationMode.Value == "Velocity" then
+            Globals.ManipulateBody.Parent = RootPart
+            Globals.ManipulateBody.Velocity = RootPart.CFrame.LookVector * 2.25
+        else
+            Globals.ManipulateBody.Parent = nil
+        end
+    else
+        Globals.ManipulateBody.Parent = nil
+    end
+
+    -- Pivot-режим — телепорт вперёд
+    if Toggles.VelocityManipulationToggle.Value
+        and Options.VelocityManipulationMode.Value == "Pivot"
+        and Floor ~= "Fools" and Floor ~= "OldHotel"
+        and Character
+    then
+        Character:PivotTo(Workspace.CurrentCamera:GetPivot() * CFrame.new(0, 0, 2560))
     end
 end)
 

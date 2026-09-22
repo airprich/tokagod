@@ -40,6 +40,7 @@ local Window = Library:CreateWindow({
     TabPadding = 3,
     MenuFadeTime = 0,
     CornerRadius = 6,
+    ToggleKeybind = Enum.KeyCode.RightShift,  -- ← ВОТ ЭТО
 })
 
 -- ВКЛАДКИ

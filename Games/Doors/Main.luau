@@ -23,12 +23,6 @@ Functions.Notify = function(Settings)
     })
 end
 
--- ============================================
--- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ (RightShift)
--- ============================================
-
-Library.ToggleKeybind = Enum.KeyCode.RightShift
-
 -- ОКНО
 local Window = Library:CreateWindow({
     Title = "tokagod",

@@ -282,25 +282,28 @@ local function OnCharacterAdded(newCharacter)
     Humanoid = newCharacter:WaitForChild("Humanoid", 10)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
 
-    -- Если speed boost был включён — применить заново
-    if Toggles.SpeedBoostToggle.Value then
-        originalWalkSpeed = Humanoid.WalkSpeed
-        ApplySpeedBoost()
+    -- Speed Boost — просто применяем через RenderStepped loop
+    if Toggles.SpeedBoostToggle.Value and Humanoid then
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
     end
 
-    -- Если fly был включён — перезапустить
+    -- Fly — перезапуск
     if Toggles.FlyToggle.Value then
-        StopFly()
         task.wait(0.5)
         StartFly()
     end
 
-    -- Если noclip был включён — перезапустить
+    -- Noclip — перезапуск
     if Toggles.NoclipToggle.Value then
-        StopNoclip()
         StartNoclip()
     end
 end
+
+-- Запускаем обработку персонажа
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
 
 -- ============================================
 -- SaveManager / ThemeManager

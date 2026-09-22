@@ -359,6 +359,25 @@ end
 
 local Settings_Misc = Tabs.Settings:AddLeftGroupbox("Misc")
 
+Settings_Misc:AddButton({
+    Text = "Unload Script",
+    Tooltip = "Полностью выгружает tokagod и очищает все соединения",
+    DoubleClick = true,
+    Risky = true,
+    Func = function()
+        if Library and Library.Unload then
+            Library:Unload()
+        end
+        if shared then
+            shared.tokagod = nil
+        end
+        if getgenv then
+            getgenv().tokagod = nil
+        end
+        print("[tokagod] Выгружен")
+    end
+})
+
 Library:OnUnload(function()
     if Toggles.SpeedBoostToggle then
         pcall(function() Toggles.SpeedBoostToggle:SetValue(false) end)

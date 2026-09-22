@@ -313,13 +313,13 @@ LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
 if SaveManager then
     SaveManager:SetLibrary(Library)
     SaveManager:SetFolder("tokagod/Doors")
-    SaveManager:BuildConfigSection(Tabs.General)
+    SaveManager:BuildConfigSection(Tabs.Settings)
     SaveManager:LoadAutoloadConfig()
 end
 
 if ThemeManager then
     ThemeManager:SetLibrary(Library)
-    ThemeManager:ApplyToTab(Tabs.General)
+    ThemeManager:ApplyToTab(Tabs.Settings)
 end
 
 -- ============================================

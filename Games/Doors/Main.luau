@@ -68,8 +68,9 @@ end
 
 Functions.FireRemote = function(remoteName, ...)
     if RemotesFolder and RemotesFolder:FindFirstChild(remoteName) then
+        local args = { ... }
         pcall(function()
-            RemotesFolder[remoteName]:FireServer(...)
+            RemotesFolder[remoteName]:FireServer(table.unpack(args))
         end)
     end
 end

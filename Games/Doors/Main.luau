@@ -109,30 +109,29 @@ Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
 -- ЛОГИКА SPEED BOOST
 -- ============================================
 
-local BASE_WALKSPEED = 16
-local originalWalkSpeed = nil
+Functions.GetCurrentSpeed = function()
+    local Speed = 15
+    if not Character or not Humanoid then return Speed end
 
-local function ApplySpeedBoost()
-    if not Humanoid then return end
+    Speed += Character:GetAttribute("SpeedBoost") or 0
+    Speed += Character:GetAttribute("SpeedBoostBehind") or 0
+    Speed += Character:GetAttribute("SpeedBoostExtra") or 0
 
-    local enabled = Toggles.SpeedBoostToggle.Value
-    local boost = Options.SpeedBoost.Value
-
-    if enabled then
-        if not originalWalkSpeed then
-            originalWalkSpeed = Humanoid.WalkSpeed
-        end
-        Humanoid.WalkSpeed = originalWalkSpeed + boost
-    else
-        if originalWalkSpeed then
-            Humanoid.WalkSpeed = originalWalkSpeed
-            originalWalkSpeed = nil
-        end
+    local LiveModifiers = game:GetService("ReplicatedStorage"):FindFirstChild("LiveModifiers")
+    if LiveModifiers then
+        Speed += (LiveModifiers:FindFirstChild("PlayerFast") and 3 or 0)
+        Speed += (LiveModifiers:FindFirstChild("PlayerFaster") and 6 or 0)
+        Speed += (LiveModifiers:FindFirstChild("PlayerFastest") and 20 or 0)
+        Speed -= (LiveModifiers:FindFirstChild("PlayerSlow") and 3 or 0)
     end
+
+    return Speed
 end
 
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
-    ApplySpeedBoost()
+    if Humanoid then
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + (Value and Options.SpeedBoost.Value or 0)
+    end
     Functions.Notify({
         Title = "Speed Boost",
         Body = Value and "Включено" or "Выключено"
@@ -140,7 +139,138 @@ Toggles.SpeedBoostToggle:OnChanged(function(Value)
 end)
 
 Options.SpeedBoost:OnChanged(function(Value)
-    ApplySpeedBoost()
+    if Toggles.SpeedBoostToggle.Value and Humanoid then
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Value
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if Toggles.SpeedBoostToggle.Value and Humanoid then
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
+    end
+end)
+
+-- ============================================
+-- ЛОГИКА FLY
+-- ============================================
+
+local flyConnection = nil
+local flyBodyVelocity = nil
+local flyBodyGyro = nil
+
+function StartFly()
+    if not Character or not RootPart or not Humanoid then return end
+    if flyConnection then return end
+
+    flyBodyVelocity = Instance.new("BodyVelocity")
+    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyVelocity.P = 1250
+    flyBodyVelocity.Parent = RootPart
+
+    flyBodyGyro = Instance.new("BodyGyro")
+    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyGyro.P = 1250
+    flyBodyGyro.CFrame = RootPart.CFrame
+    flyBodyGyro.Parent = RootPart
+
+    Humanoid.PlatformStand = true
+
+    local UserInputService = game:GetService("UserInputService")
+    local Camera = Workspace.CurrentCamera
+
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not RootPart or not Humanoid then return end
+
+        local cameraCFrame = Camera.CFrame
+        local forward = cameraCFrame.LookVector
+        local right = cameraCFrame.RightVector
+        local direction = Vector3.zero
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            direction = direction + forward
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            direction = direction - forward
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            direction = direction - right
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            direction = direction + right
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            direction = direction + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            direction = direction - Vector3.new(0, 1, 0)
+        end
+
+        if direction.Magnitude > 0 then
+            direction = direction.Unit
+        end
+
+        flyBodyVelocity.Velocity = direction * Options.FlySpeed.Value
+        flyBodyGyro.CFrame = cameraCFrame
+    end)
+end
+
+function StopFly()
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+    if flyBodyVelocity then
+        flyBodyVelocity:Destroy()
+        flyBodyVelocity = nil
+    end
+    if flyBodyGyro then
+        flyBodyGyro:Destroy()
+        flyBodyGyro = nil
+    end
+    if Humanoid then
+        Humanoid.PlatformStand = false
+    end
+end
+
+Toggles.FlyToggle:OnChanged(function(Value)
+    if Value then
+        StartFly()
+    else
+        StopFly()
+    end
+end)
+
+-- ============================================
+-- ЛОГИКА NOCLIP
+-- ============================================
+
+local noclipConnection = nil
+
+function StartNoclip()
+    if noclipConnection then return end
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not Character then return end
+        for _, part in ipairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+function StopNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+end
+
+Toggles.NoclipToggle:OnChanged(function(Value)
+    if Value then
+        StartNoclip()
+    else
+        StopNoclip()
+    end
 end)
 
 -- ============================================

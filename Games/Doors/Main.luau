@@ -15,6 +15,8 @@ local Toggles = Library.Toggles
 local Options = Library.Options
 local Functions = {}
 
+local Character, Humanoid, RootPart
+
 Functions.Notify = function(Settings)
     tokagod.Notify:Send({
         Title = Settings.Title or "tokagod",
@@ -22,6 +24,10 @@ Functions.Notify = function(Settings)
         Time = Settings.Time or 5
     })
 end
+
+-- ============================================
+-- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ
+-- ============================================
 
 -- ОКНО
 local Window = Library:CreateWindow({
@@ -34,7 +40,7 @@ local Window = Library:CreateWindow({
     TabPadding = 3,
     MenuFadeTime = 0,
     CornerRadius = 6,
-    ToggleKeybind = Enum.KeyCode.RightShift,  -- ← ВОТ ЭТО
+    ToggleKeybind = Enum.KeyCode.RightShift,
 })
 
 -- ВКЛАДКИ
@@ -54,51 +60,27 @@ Groupboxes.General_Character   = Tabs.General:AddLeftGroupbox("Character")
 Groupboxes.General_Self        = Tabs.General:AddLeftGroupbox("Self")
 Groupboxes.Self_Automation     = Tabs.General:AddRightGroupbox("Automation")
 Groupboxes.Self_Misc           = Tabs.General:AddRightGroupbox("Miscellaneous")
-Groupboxes.Debug               = Tabs.General:AddRightGroupbox("Debug")
 
-Groupboxes.Exploits_Bypass     = Tabs.Exploits:AddLeftGroupbox("Bypass / Solve")
-Groupboxes.Exploits_Audio      = Tabs.Exploits:AddLeftGroupbox("Audio")
-Groupboxes.Exploits_BypassRight= Tabs.Exploits:AddRightGroupbox("Bypass")
-Groupboxes.Exploits_Remove     = Tabs.Exploits:AddRightGroupbox("Remove")
+-- ============================================
+-- CHARACTER / SPEED BOOST
+-- ============================================
 
-Groupboxes.Visuals_LeftTab     = Tabs.Visuals:AddLeftTabbox("Camera / Effects")
-Groupboxes.Visuals_Camera      = Groupboxes.Visuals_LeftTab:AddTab("Camera")
-Groupboxes.Visuals_Effects     = Groupboxes.Visuals_LeftTab:AddTab("Effects")
-
-Groupboxes.Visuals_RightTab    = Tabs.Visuals:AddRightTabbox("Entities / Settings")
-Groupboxes.Visuals_Entities    = Groupboxes.Visuals_RightTab:AddTab("Entities")
-Groupboxes.Visuals_EntitySettings = Groupboxes.Visuals_RightTab:AddTab("Settings")
-
-Groupboxes.Visuals_ESP         = Tabs.Visuals:AddRightTabbox("ESP/Settings")
-Groupboxes.Visuals_ESP_Toggles = Groupboxes.Visuals_ESP:AddTab("ESP")
-Groupboxes.Visuals_ESP_Settings= Groupboxes.Visuals_ESP:AddTab("Settings")
-
-Groupboxes.Floors_Automation   = Tabs.Floors:AddRightGroupbox("Automation")
-Groupboxes.Floors_Completion   = Tabs.Floors:AddRightGroupbox("Completion")
-Groupboxes.Floors_Visuals      = Tabs.Floors:AddLeftGroupbox("Visuals")
-Groupboxes.Floors_Bypass       = Tabs.Floors:AddLeftGroupbox("Bypass")
-Groupboxes.Floors_Farming      = Tabs.Floors:AddLeftGroupbox("Farming")
-
-Groupboxes.Archives_Misc       = Tabs.Archives:AddRightGroupbox("Exploits / Anti")
-Groupboxes.Archives_Bypasses   = Tabs.Archives:AddLeftGroupbox("Bypasses")
-Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
-
-Groupboxes.Stairwell_Misc      = Tabs.Stairwell:AddLeftGroupbox("Exploits / Anti")
-Groupboxes.Stairwell_Experimental = Tabs.Stairwell:AddLeftGroupbox("Experimental")
-
--- ПРИМЕРНЫЕ ЭЛЕМЕНТЫ (потом удалишь)
-Groupboxes.General_Character:AddSlider("SpeedBoostSlider", {
-    Text = "Speed Boost", Min = 0, Max = 100, Default = 0, Rounding = 0, Compact = true
+Groupboxes.General_Character:AddSlider("SpeedBoost", {
+    Text = "Speed Boost",
+    Min = 0, Max = 100, Default = 0,
+    Rounding = 0, Compact = true
 })
 
 Groupboxes.General_Character:AddToggle("SpeedBoostToggle", {
-    Text = "Enable Speed Boost", Default = false,
-    Tooltip = "Increases your walkspeed."
+    Text = "Enable Speed Boost",
+    Default = false,
+    Tooltip = "Увеличивает скорость на значение слайдера"
 })
 
 Groupboxes.General_Character:AddToggle("FlyToggle", {
-    Text = "Fly", Default = false,
-    Tooltip = "Allows you to fly."
+    Text = "Fly",
+    Default = false,
+    Tooltip = "Полёт"
 })
 
 Toggles.FlyToggle:AddKeyPicker("FlyKeybind", {
@@ -106,21 +88,236 @@ Toggles.FlyToggle:AddKeyPicker("FlyKeybind", {
 })
 
 Groupboxes.General_Character:AddSlider("FlySpeed", {
-    Text = "Fly Speed", Min = 0, Max = 115, Default = 20, Rounding = 0, Compact = true
+    Text = "Fly Speed",
+    Min = 0, Max = 115, Default = 20,
+    Rounding = 0, Compact = true
 })
 
 Groupboxes.General_Character:AddDivider()
 
 Groupboxes.General_Character:AddToggle("NoclipToggle", {
-    Text = "Noclip", Default = false,
-    Tooltip = "Walk through walls."
+    Text = "Noclip",
+    Default = false,
+    Tooltip = "Проходить сквозь стены"
 })
 
 Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
     Text = "Noclip", Default = "N", Mode = "Toggle", SyncToggleState = true
 })
 
+-- ============================================
+-- ЛОГИКА SPEED BOOST
+-- ============================================
+
+local BASE_WALKSPEED = 16
+local originalWalkSpeed = nil
+
+-- Функция которая срабатывает при изменении слайдера ИЛИ тумблера
+local function ApplySpeedBoost()
+    if not Humanoid then return end
+
+    local enabled = Toggles.SpeedBoostToggle.Value
+    local boost = Options.SpeedBoost.Value
+
+    if enabled then
+        if not originalWalkSpeed then
+            originalWalkSpeed = Humanoid.WalkSpeed
+        end
+        Humanoid.WalkSpeed = originalWalkSpeed + boost
+    else
+        if originalWalkSpeed then
+            Humanoid.WalkSpeed = originalWalkSpeed
+            originalWalkSpeed = nil
+        end
+    end
+end
+
+-- Тумблер включён/выключен
+Toggles.SpeedBoostToggle:OnChanged(function(Value)
+    ApplySpeedBoost()
+    Functions.Notify({
+        Title = "Speed Boost",
+        Body = Value and "Включено" or "Выключено"
+    })
+end)
+
+-- Слайдер двигается
+Options.SpeedBoost:OnChanged(function(Value)
+    ApplySpeedBoost()
+end)
+
+-- ============================================
+-- ЛОГИКА FLY
+-- ============================================
+
+local flyConnection = nil
+local flyBodyVelocity = nil
+local flyBodyGyro = nil
+
+local function StartFly()
+    if not Character or not RootPart or not Humanoid then return end
+    if flyConnection then return end
+
+    flyBodyVelocity = Instance.new("BodyVelocity")
+    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyVelocity.P = 1250
+    flyBodyVelocity.Parent = RootPart
+
+    flyBodyGyro = Instance.new("BodyGyro")
+    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyGyro.P = 1250
+    flyBodyGyro.CFrame = RootPart.CFrame
+    flyBodyGyro.Parent = RootPart
+
+    Humanoid.PlatformStand = true
+
+    local UserInputService = game:GetService("UserInputService")
+    local Camera = Workspace.CurrentCamera
+
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not RootPart or not Humanoid then return end
+
+        local moveDirection = Humanoid.MoveDirection
+        local cameraCFrame = Camera.CFrame
+
+        local forward = cameraCFrame.LookVector
+        local right = cameraCFrame.RightVector
+
+        local direction = Vector3.zero
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            direction = direction + forward
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            direction = direction - forward
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            direction = direction - right
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            direction = direction + right
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            direction = direction + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            direction = direction - Vector3.new(0, 1, 0)
+        end
+
+        if direction.Magnitude > 0 then
+            direction = direction.Unit
+        end
+
+        flyBodyVelocity.Velocity = direction * Options.FlySpeed.Value
+        flyBodyGyro.CFrame = cameraCFrame
+    end)
+end
+
+local function StopFly()
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+
+    if flyBodyVelocity then
+        flyBodyVelocity:Destroy()
+        flyBodyVelocity = nil
+    end
+
+    if flyBodyGyro then
+        flyBodyGyro:Destroy()
+        flyBodyGyro = nil
+    end
+
+    if Humanoid then
+        Humanoid.PlatformStand = false
+    end
+end
+
+Toggles.FlyToggle:OnChanged(function(Value)
+    if Value then
+        StartFly()
+    else
+        StopFly()
+    end
+end)
+
+Options.FlySpeed:OnChanged(function(Value)
+    -- Скорость применяется в RenderStepped, ничего не нужно
+end)
+
+-- ============================================
+-- ЛОГИКА NOCLIP
+-- ============================================
+
+local noclipConnection = nil
+
+local function StartNoclip()
+    if noclipConnection then return end
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not Character then return end
+        for _, part in ipairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function StopNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+end
+
+Toggles.NoclipToggle:OnChanged(function(Value)
+    if Value then
+        StartNoclip()
+    else
+        StopNoclip()
+    end
+end)
+
+-- ============================================
+-- ОБРАБОТКА ПЕРСОНАЖА (CharacterAdded)
+-- ============================================
+
+local function OnCharacterAdded(newCharacter)
+    Character = newCharacter
+    Humanoid = newCharacter:WaitForChild("Humanoid", 10)
+    RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
+
+    -- Если speed boost был включён — применить заново
+    if Toggles.SpeedBoostToggle.Value then
+        originalWalkSpeed = Humanoid.WalkSpeed
+        ApplySpeedBoost()
+    end
+
+    -- Если fly был включён — перезапустить
+    if Toggles.FlyToggle.Value then
+        StopFly()
+        task.wait(0.5)
+        StartFly()
+    end
+
+    -- Если noclip был включён — перезапустить
+    if Toggles.NoclipToggle.Value then
+        StopNoclip()
+        StartNoclip()
+    end
+end
+
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+
+-- ============================================
 -- SaveManager / ThemeManager
+-- ============================================
+
 if SaveManager then
     SaveManager:SetLibrary(Library)
     SaveManager:SetFolder("tokagod/Doors")
@@ -132,6 +329,10 @@ if ThemeManager then
     ThemeManager:SetLibrary(Library)
     ThemeManager:ApplyToTab(Tabs.General)
 end
+
+-- ============================================
+-- ЗАГРУЗКА
+-- ============================================
 
 Functions.Notify({
     Title = "tokagod загружен",

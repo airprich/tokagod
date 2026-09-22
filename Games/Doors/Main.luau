@@ -405,8 +405,7 @@ local manipulateBody = nil
 local function UpdateVelocityManipulation()
     if not Toggles.VelocityManipulationToggle.Value or not RootPart then
         if manipulateBody and manipulateBody.Parent then
-            manipulateBody:Destroy()
-            manipulateBody = nil
+            manipulateBody.Parent = nil
         end
         return
     end
@@ -417,7 +416,13 @@ local function UpdateVelocityManipulation()
         table.insert(Globals.BodyObjects, manipulateBody)
     end
 
-    if Options.VelocityManipulationMode.Value == "Velocity" then
+    -- Безопасное получение режима
+    local mode = "Velocity"
+    if Options.VelocityManipulationMode and Options.VelocityManipulationMode.Value then
+        mode = Options.VelocityManipulationMode.Value
+    end
+
+    if mode == "Velocity" then
         manipulateBody.Parent = RootPart
         manipulateBody.Velocity = RootPart.CFrame.LookVector * 2.25
     else

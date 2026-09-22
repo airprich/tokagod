@@ -1,6 +1,7 @@
 -- tokagod Main (структура меню по образцу Abysall)
 
 local tokagod = getgenv().tokagod
+local Globals = {}
 local Library = tokagod.Interface.Library
 local SaveManager = tokagod.Interface.SaveManager
 local ThemeManager = tokagod.Interface.ThemeManager
@@ -319,6 +320,21 @@ Toggles.NoclipToggle:OnChanged(function(Value)
 end)
 
 -- ============================================
+-- ANTICHEAT BYPASS
+-- ============================================
+
+Globals.AnticheatDisabled = false
+
+Toggles.DisableAnticheat:OnChanged(function(Value)
+    if Globals.AnticheatDisabled == true and not Value then
+        if RemotesFolder and RemotesFolder:FindFirstChild("ClimbLadder") then
+            RemotesFolder.ClimbLadder:FireServer()
+        end
+        Globals.AnticheatDisabled = false
+    end
+end)
+
+-- ============================================
 -- ОБРАБОТКА ПЕРСОНАЖА (CharacterAdded)
 -- ============================================
 
@@ -350,6 +366,16 @@ if LocalPlayer.Character then
     OnCharacterAdded(LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+
+    -- Античит-байпас через лестницу
+    local AnticheatDisabler = Character:GetAttributeChangedSignal("Climbing"):Connect(function()
+        if Character:GetAttribute("Climbing") == true and Toggles.DisableAnticheat.Value and not Globals.AnticheatDisabled then
+            task.wait(0.25)
+            Character:SetAttribute("Climbing", false)
+            Functions.Notify({ Title = "Античит отключён", Body = "Теперь Speed Boost работает" })
+            Globals.AnticheatDisabled = true
+        end
+    end)
 
 -- ============================================
 -- SaveManager / ThemeManager

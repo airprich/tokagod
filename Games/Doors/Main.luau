@@ -479,28 +479,37 @@ local function ScanAndUpdate()
     local seen = {}
 
     for _, Object in ipairs(Workspace:GetDescendants()) do
-        local category, label = ClassifyObject(Object)
-        if category then
-            seen[Object] = true
+        local category, label, target = ClassifyObject(Object)
+        if category and target then
+            seen[target] = true
 
             local toggleName = ESPToggleMap[category]
             local colorName  = ESPColorMap[category]
             local isOn = Toggles[toggleName] and Toggles[toggleName].Value
 
-            if isOn and not ESP.Added[Object] then
+            -- Доп. фильтр для сущностей: проверка по списку
+            if isOn and category == "Entities" then
+                local EntityOptions = Options.EntityESPOptions
+                if EntityOptions and EntityOptions.Value then
+                    if not EntityOptions.Value[label] then
+                        isOn = false
+                    end
+                end
+            end
+            if isOn and not ESP.Added[target] then
                 local ok = pcall(function()
                     ESPLibrary:AddESP({
-                        Object = Object,
+                        Object = target,
                         Text = label,
                         Color = Options[colorName].Value,
                     })
                 end)
                 if ok then
-                    ESP.Added[Object] = category
+                    ESP.Added[target] = category
                 end
-            elseif not isOn and ESP.Added[Object] then
-                pcall(function() ESPLibrary:RemoveESP(Object) end)
-                ESP.Added[Object] = nil
+            elseif not isOn and ESP.Added[target] then
+                pcall(function() ESPLibrary:RemoveESP(target) end)
+                ESP.Added[target] = nil
             end
         end
     end
@@ -567,6 +576,18 @@ Groupboxes.Visuals_ESP:AddToggle("ItemESPToggle",       { Text = "Items", Defaul
 Groupboxes.Visuals_ESP:AddToggle("CurrencyESPToggle",   { Text = "Currency", Default = false })
 Groupboxes.Visuals_ESP:AddToggle("LadderESPToggle",     { Text = "Ladders", Default = false })
 Groupboxes.Visuals_ESP:AddDivider()
+Groupboxes.Visuals_ESP:AddDropdown("EntityESPOptions", {
+    Text = "Entities List",
+    Values = {
+        "Rush","Bash","Scribbles","Teller","DronesStampede","Creak","Noise","Balls",
+        "Ambush","Eyes","Dupe","Figure","Blitz","Lookman","Snare","Giggle",
+        "Gloombat Eggs","Grumble","A-60","A-120","Sally","Jeff the Killer",
+        "Groundskeeper","Mandrake Hole","Monument","Bramble","AR0xMBUSH","RNIUSHCG=="
+    },
+    Default = { "Rush", "Ambush", "Blitz", "A-60", "A-120", "AR0xMBUSH", "RNIUSHCG==" },
+    Multi = true,
+    AllowNull = true,
+})
 Groupboxes.Visuals_ESP:AddToggle("EntityESPToggle",     { Text = "Entities", Default = false })
 
 Toggles.ObjectiveESPToggle:AddColorPicker("ObjectiveESPColor", { Text = "Objectives", Default = Color3.fromRGB(0,255,0), Transparency = 0 })

@@ -73,6 +73,12 @@ Groupboxes.General_Self        = Tabs.General:AddLeftGroupbox("Self")
 Groupboxes.Self_Automation     = Tabs.General:AddRightGroupbox("Automation")
 Groupboxes.Self_Misc           = Tabs.General:AddRightGroupbox("Miscellaneous")
 
+Groupboxes.General_Self:AddToggle("DisableAnticheat", {
+    Text = "Anticheat Bypass",
+    Default = false,
+    Tooltip = "Отключает античит при взаимодействии с лестницей. Без него Speed Boost откатывает."
+})
+
 -- ============================================
 -- CHARACTER / SPEED BOOST
 -- ============================================

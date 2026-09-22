@@ -375,19 +375,38 @@ Toggles.FlyToggle:OnChanged(function(Value)
 end)
 
 -- ============================================
--- ЛОГИКА NOCLIP
+-- ЛОГИКА NOCLIP (Abysall version + античит-обход)
 -- ============================================
 
 local noclipConnection = nil
 
+-- Noclip с защитой от античита DOORS:
+-- 1. Ставит CanCollide = false на все части
+-- 2. Использует Crouch:FireServer для маскировки под "приседание"
+-- 3. Не палится, потому что работает как Position Spoof
+
 function StartNoclip()
     if noclipConnection then return end
+    
     noclipConnection = RunService.Stepped:Connect(function()
         if not Character then return end
+        
+        -- Основная логика: отключаем коллизии
         for _, part in ipairs(Character:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
+        end
+        
+        -- Маскировка под crouch (обход античита)
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            RemotesFolder.Crouch:FireServer(true, true)
+        end
+        
+        -- Position Spoof (если включён) — хитбокс под пол
+        if Toggles.PositionSpoof and Toggles.PositionSpoof.Value and RootPart and Humanoid then
+            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+            Humanoid.HipHeight = 0.05
         end
     end)
 end
@@ -397,13 +416,30 @@ function StopNoclip()
         noclipConnection:Disconnect()
         noclipConnection = nil
     end
+    
+    -- Восстанавливаем коллизии
+    if Character then
+        for _, part in ipairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
 end
 
 Toggles.NoclipToggle:OnChanged(function(Value)
     if Value then
         StartNoclip()
+        Functions.Notify({
+            Title = "Noclip",
+            Body = "Включено (с обходом античита)"
+        })
     else
         StopNoclip()
+        Functions.Notify({
+            Title = "Noclip",
+            Body = "Выключено"
+        })
     end
 end)
 

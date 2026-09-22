@@ -51,6 +51,7 @@ local Tabs = {
     Floors    = Window:AddTab("Floors", "earth"),
     Archives  = Window:AddTab("New - Archives", "rbxassetid://104508835882225"),
     Stairwell = Window:AddTab("New - Stairwell", "rbxassetid://80017304328364"),
+    Settings  = Window:AddTab("Settings", "settings"),
 }
 
 -- ГРУПБОКСЫ

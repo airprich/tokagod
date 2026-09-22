@@ -42,8 +42,8 @@ end
 
 -- ОКНО
 local Window = Library:CreateWindow({
-    Title = "tokagod",
-    Footer = "dsc.gg/tokagod",
+    Title = "???",
+    Footer = "dsc.gg/???",
     NotifySide = "Right",
     ShowCustomCursor = false,
     AutoShow = true,

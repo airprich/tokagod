@@ -1,7 +1,11 @@
--- tokagod Main (структура меню по образцу Abysall)
+-- tokagod Main (рефактор: clean architecture + proper cleanup)
 
 local tokagod = getgenv().tokagod
-local Globals = {}
+local Globals = {
+    Connections = {},
+    BodyObjects = {},
+    Active = {}
+}
 local Library = tokagod.Interface.Library
 local SaveManager = tokagod.Interface.SaveManager
 local ThemeManager = tokagod.Interface.ThemeManager
@@ -10,6 +14,7 @@ local ESPLibrary = tokagod.ESPLibrary
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 local Toggles = Library.Toggles
@@ -19,14 +24,15 @@ local Functions = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Floor = ReplicatedStorage:WaitForChild("GameData"):WaitForChild("Floor").Value
 local LiveModifiers = ReplicatedStorage:FindFirstChild("LiveModifiers")
-local CurrentRooms = workspace:FindFirstChild("CurrentRooms")
-local CollisionPart
-
 local RemotesFolder = ReplicatedStorage:FindFirstChild("RemotesFolder")
     or ReplicatedStorage:FindFirstChild("EntityInfo")
     or ReplicatedStorage:FindFirstChild("Bricks")
 
 local Character, Humanoid, RootPart
+
+-- ============================================
+-- UTILITY
+-- ============================================
 
 Functions.Notify = function(Settings)
     tokagod.Notify:Send({
@@ -36,11 +42,42 @@ Functions.Notify = function(Settings)
     })
 end
 
+Functions.ConnectSignal = function(signal, callback)
+    local conn = signal:Connect(callback)
+    table.insert(Globals.Connections, conn)
+    return conn
+end
+
+Functions.DisconnectAll = function()
+    for _, conn in ipairs(Globals.Connections) do
+        if conn and conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    Globals.Connections = {}
+end
+
+Functions.CleanupBodyObjects = function()
+    for _, obj in ipairs(Globals.BodyObjects) do
+        if obj and obj.Parent then
+            obj:Destroy()
+        end
+    end
+    Globals.BodyObjects = {}
+end
+
+Functions.FireRemote = function(remoteName, ...)
+    if RemotesFolder and RemotesFolder:FindFirstChild(remoteName) then
+        pcall(function()
+            RemotesFolder[remoteName]:FireServer(...)
+        end)
+    end
+end
+
 -- ============================================
--- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ
+-- WINDOW & TABS
 -- ============================================
 
--- ОКНО
 local Window = Library:CreateWindow({
     Title = "??",
     Footer = "dsc.gg/???",
@@ -54,7 +91,6 @@ local Window = Library:CreateWindow({
     ToggleKeybind = Enum.KeyCode.RightShift,
 })
 
--- ВКЛАДКИ
 local Tabs = {
     General   = Window:AddTab("General", "house"),
     Exploits  = Window:AddTab("Exploits", "shield"),
@@ -65,7 +101,6 @@ local Tabs = {
     Settings  = Window:AddTab("Settings", "settings"),
 }
 
--- ГРУПБОКСЫ
 local Groupboxes = {}
 
 Groupboxes.General_Character   = Tabs.General:AddLeftGroupbox("Character")
@@ -73,15 +108,15 @@ Groupboxes.General_Self        = Tabs.General:AddLeftGroupbox("Self")
 Groupboxes.Self_Automation     = Tabs.General:AddRightGroupbox("Automation")
 Groupboxes.Self_Misc           = Tabs.General:AddRightGroupbox("Miscellaneous")
 
+-- ============================================
+-- TOGGLES & OPTIONS
+-- ============================================
+
 Groupboxes.General_Self:AddToggle("DisableAnticheat", {
     Text = "Anticheat Bypass",
     Default = false,
-    Tooltip = "Отключает античит при взаимодействии с лестницей. Без него Speed Boost откатывает."
+    Tooltip = "Обход античита при взаимодействии с лестницей"
 })
-
--- ============================================
--- CHARACTER / SPEED BOOST
--- ============================================
 
 Groupboxes.General_Character:AddSlider("SpeedBoost", {
     Text = "Speed Boost",
@@ -92,7 +127,7 @@ Groupboxes.General_Character:AddSlider("SpeedBoost", {
 Groupboxes.General_Character:AddToggle("SpeedBoostToggle", {
     Text = "Enable Speed Boost",
     Default = false,
-    Tooltip = "Увеличивает скорость на значение слайдера"
+    Tooltip = "Увеличивает скорость"
 })
 
 Groupboxes.General_Character:AddToggle("FlyToggle", {
@@ -100,7 +135,6 @@ Groupboxes.General_Character:AddToggle("FlyToggle", {
     Default = false,
     Tooltip = "Полёт"
 })
-
 Toggles.FlyToggle:AddKeyPicker("FlyKeybind", {
     Text = "Fly", Default = "F", Mode = "Toggle", SyncToggleState = true
 })
@@ -118,7 +152,6 @@ Groupboxes.General_Character:AddToggle("NoclipToggle", {
     Default = false,
     Tooltip = "Проходить сквозь стены"
 })
-
 Toggles.NoclipToggle:AddKeyPicker("NoclipKeybind", {
     Text = "Noclip", Default = "N", Mode = "Toggle", SyncToggleState = true
 })
@@ -128,9 +161,8 @@ Groupboxes.General_Character:AddDivider()
 Groupboxes.General_Character:AddToggle("PositionSpoof", {
     Text = "Position Spoof",
     Default = false,
-    Tooltip = "Телепортирует хитбокс под пол — античит не ловит скорость"
+    Tooltip = "Телепортирует хитбокс под пол"
 })
-
 Toggles.PositionSpoof:AddKeyPicker("PositionSpoofKeybind", {
     Text = "Position Spoof", Default = "B", Mode = "Toggle", SyncToggleState = true
 })
@@ -138,9 +170,8 @@ Toggles.PositionSpoof:AddKeyPicker("PositionSpoofKeybind", {
 Groupboxes.General_Character:AddToggle("VelocityManipulationToggle", {
     Text = "Velocity Manipulation",
     Default = false,
-    Tooltip = "Медленно двигает тебя вперёд через физику — обход античита"
+    Tooltip = "Обход античита через физику"
 })
-
 Toggles.VelocityManipulationToggle:AddKeyPicker("VelocityManipulationKeybind", {
     Text = "Velocity Manipulation", Default = "V", Mode = "Toggle", SyncToggleState = true
 })
@@ -152,7 +183,7 @@ Groupboxes.General_Character:AddDropdown("VelocityManipulationMode", {
 })
 
 -- ============================================
--- ЛОГИКА SPEED BOOST
+-- SPEED LOGIC
 -- ============================================
 
 Functions.IsCrouching = function()
@@ -160,6 +191,7 @@ Functions.IsCrouching = function()
     if Floor == "Fools" or Floor == "OldHotel" then
         return Character:GetAttribute("Crouching") == true
     end
+    local CollisionPart = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
     return CollisionPart and CollisionPart.CollisionGroup == "PlayerCrouching" or false
 end
 
@@ -186,238 +218,134 @@ Functions.GetCurrentSpeed = function()
     end
 
     if Functions.IsCrouching() then
-        if LiveModifiers and LiveModifiers:FindFirstChild("PlayerCrouchSlow") then
-            Speed -= 8
-        elseif LiveModifiers and LiveModifiers:FindFirstChild("PlayerSlow") then
-            Speed -= 8
-        else
-            Speed -= 5
-        end
+        Speed -= (LiveModifiers and LiveModifiers:FindFirstChild("PlayerCrouchSlow") and 8 or 5)
     end
 
     return Speed
 end
 
-Toggles.SpeedBoostToggle:OnChanged(function(Value)
+local function UpdateSpeed()
     if Humanoid then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + (Value and Options.SpeedBoost.Value or 0)
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + (Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value or 0)
     end
-    -- Сообщаем серверу
-    if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-        RemotesFolder.Crouch:FireServer(false, true)
-    end
+    Functions.FireRemote("Crouch", false, true)
+end
+
+Toggles.SpeedBoostToggle:OnChanged(function(Value)
+    UpdateSpeed()
     Functions.Notify({
         Title = "Speed Boost",
         Body = Value and "Включено" or "Выключено"
     })
 end)
 
-Options.SpeedBoost:OnChanged(function(Value)
+Options.SpeedBoost:OnChanged(function()
+    if Toggles.SpeedBoostToggle.Value then
+        UpdateSpeed()
+    end
+end)
+
+Functions.ConnectSignal(RunService.Heartbeat, function()
     if Toggles.SpeedBoostToggle.Value and Humanoid then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Value
-    end
-    -- Сообщаем серверу, что скорость изменилась (обход античита)
-    if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-        RemotesFolder.Crouch:FireServer(false, true)
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if Toggles.SpeedBoostToggle.Value and Humanoid then
-            Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
-        end
+        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
     end
 end)
 
 -- ============================================
--- POSITION SPOOF + VELOCITY MANIPULATION
+-- FLY
 -- ============================================
 
-Globals.ManipulateBody = Instance.new("BodyVelocity")
-Globals.ManipulateBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-
-Toggles.PositionSpoof:OnChanged(function(Value)
-    if Floor == "Fools" or Floor == "OldHotel" then return end
-    if not RootPart or not Humanoid then return end
-    if Value then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-        Humanoid.HipHeight = 0.05
-        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-            RemotesFolder.Crouch:FireServer(true, true)
-        end
-    else
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-        Humanoid.HipHeight = 2.396
-    end
-end)
-
-RunService.RenderStepped:Connect(function()
-    -- Position Spoof — постоянное применение
-    if Toggles.PositionSpoof.Value and RootPart and Humanoid then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-        Humanoid.HipHeight = 0.05
-        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-            RemotesFolder.Crouch:FireServer(true, true)
-        end
-    end
-
-    -- Velocity Manipulation
-    if Toggles.VelocityManipulationToggle.Value and RootPart then
-        if Options.VelocityManipulationMode.Value == "Velocity" then
-            Globals.ManipulateBody.Parent = RootPart
-            Globals.ManipulateBody.Velocity = RootPart.CFrame.LookVector * 2.25
-        else
-            Globals.ManipulateBody.Parent = nil
-        end
-    else
-        Globals.ManipulateBody.Parent = nil
-    end
-
-    -- Pivot-режим — телепорт вперёд
-    if Toggles.VelocityManipulationToggle.Value
-        and Options.VelocityManipulationMode.Value == "Pivot"
-        and Floor ~= "Fools" and Floor ~= "OldHotel"
-        and Character
-    then
-        Character:PivotTo(Workspace.CurrentCamera:GetPivot() * CFrame.new(0, 0, 2560))
-    end
-end)
-
--- ============================================
--- ЛОГИКА FLY
--- ============================================
-
-local flyConnection = nil
-local flyBodyVelocity = nil
-local flyBodyGyro = nil
-
-function StartFly()
+local function StartFly()
     if not Character or not RootPart or not Humanoid then return end
-    if flyConnection then return end
+    if Globals.Active.Fly then return end
 
-    flyBodyVelocity = Instance.new("BodyVelocity")
-    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyVelocity.P = 1250
-    flyBodyVelocity.Parent = RootPart
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocity.P = 1250
+    bodyVelocity.Parent = RootPart
 
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyGyro.P = 1250
-    flyBodyGyro.CFrame = RootPart.CFrame
-    flyBodyGyro.Parent = RootPart
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.P = 1250
+    bodyGyro.CFrame = RootPart.CFrame
+    bodyGyro.Parent = RootPart
+
+    table.insert(Globals.BodyObjects, bodyVelocity)
+    table.insert(Globals.BodyObjects, bodyGyro)
 
     Humanoid.PlatformStand = true
+    Globals.Active.Fly = true
 
-    local UserInputService = game:GetService("UserInputService")
     local Camera = Workspace.CurrentCamera
+    local conn = Functions.ConnectSignal(RunService.RenderStepped, function()
+        if not RootPart or not Humanoid or not Globals.Active.Fly then return end
 
-    flyConnection = RunService.RenderStepped:Connect(function()
-        if not RootPart or not Humanoid then return end
-
-        local cameraCFrame = Camera.CFrame
-        local forward = cameraCFrame.LookVector
-        local right = cameraCFrame.RightVector
         local direction = Vector3.zero
+        local cam = Camera.CFrame
 
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            direction = direction + forward
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            direction = direction - forward
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            direction = direction - right
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            direction = direction + right
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            direction = direction + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-            direction = direction - Vector3.new(0, 1, 0)
-        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - cam.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + cam.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction = direction + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then direction = direction - Vector3.new(0, 1, 0) end
 
-        if direction.Magnitude > 0 then
-            direction = direction.Unit
-        end
+        if direction.Magnitude > 0 then direction = direction.Unit end
 
-        flyBodyVelocity.Velocity = direction * Options.FlySpeed.Value
-        flyBodyGyro.CFrame = cameraCFrame
+        bodyVelocity.Velocity = direction * Options.FlySpeed.Value
+        bodyGyro.CFrame = cam
     end)
+
+    Globals.Active.FlyConnection = conn
 end
 
-function StopFly()
-    if flyConnection then
-        flyConnection:Disconnect()
-        flyConnection = nil
-    end
-    if flyBodyVelocity then
-        flyBodyVelocity:Destroy()
-        flyBodyVelocity = nil
-    end
-    if flyBodyGyro then
-        flyBodyGyro:Destroy()
-        flyBodyGyro = nil
+local function StopFly()
+    if Globals.Active.FlyConnection then
+        Globals.Active.FlyConnection:Disconnect()
+        Globals.Active.FlyConnection = nil
     end
     if Humanoid then
         Humanoid.PlatformStand = false
     end
+    Globals.Active.Fly = false
 end
 
 Toggles.FlyToggle:OnChanged(function(Value)
-    if Value then
-        StartFly()
-    else
-        StopFly()
-    end
+    if Value then StartFly() else StopFly() end
 end)
 
 -- ============================================
--- ЛОГИКА NOCLIP (Abysall version + античит-обход)
+-- NOCLIP
 -- ============================================
 
-local noclipConnection = nil
+local function StartNoclip()
+    if Globals.Active.Noclip then return end
 
--- Noclip с защитой от античита DOORS:
--- 1. Ставит CanCollide = false на все части
--- 2. Использует Crouch:FireServer для маскировки под "приседание"
--- 3. Не палится, потому что работает как Position Spoof
+    Globals.Active.Noclip = true
+    Globals.Active.NoclipConnection = Functions.ConnectSignal(RunService.Stepped, function()
+        if not Character or not Globals.Active.Noclip then return end
 
-function StartNoclip()
-    if noclipConnection then return end
-    
-    noclipConnection = RunService.Stepped:Connect(function()
-        if not Character then return end
-        
-        -- Основная логика: отключаем коллизии
         for _, part in ipairs(Character:GetDescendants()) do
-            if part:IsA("BasePart") and part.CanCollide then
+            if part:IsA("BasePart") then
                 part.CanCollide = false
             end
         end
-        
-        -- Маскировка под crouch (обход античита)
-        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-            RemotesFolder.Crouch:FireServer(true, true)
-        end
-        
-        -- Position Spoof (если включён) — хитбокс под пол
-        if Toggles.PositionSpoof and Toggles.PositionSpoof.Value and RootPart and Humanoid then
+
+        Functions.FireRemote("Crouch", true, true)
+
+        if Toggles.PositionSpoof.Value and RootPart and Humanoid then
             RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
             Humanoid.HipHeight = 0.05
         end
     end)
 end
 
-function StopNoclip()
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
+local function StopNoclip()
+    if Globals.Active.NoclipConnection then
+        Globals.Active.NoclipConnection:Disconnect()
+        Globals.Active.NoclipConnection = nil
     end
-    
-    -- Восстанавливаем коллизии
+
     if Character then
         for _, part in ipairs(Character:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -425,77 +353,118 @@ function StopNoclip()
             end
         end
     end
+
+    Globals.Active.Noclip = false
 end
 
 Toggles.NoclipToggle:OnChanged(function(Value)
     if Value then
         StartNoclip()
-        Functions.Notify({
-            Title = "Noclip",
-            Body = "Включено (с обходом античита)"
-        })
+        Functions.Notify({ Title = "Noclip", Body = "Включено" })
     else
         StopNoclip()
-        Functions.Notify({
-            Title = "Noclip",
-            Body = "Выключено"
-        })
+        Functions.Notify({ Title = "Noclip", Body = "Выключено" })
     end
 end)
 
 -- ============================================
--- ANTICHEAT BYPASS
+-- POSITION SPOOF
 -- ============================================
 
-Globals.AnticheatDisabled = false
+local function ApplyPositionSpoof(enable)
+    if not RootPart or not Humanoid or Floor == "Fools" or Floor == "OldHotel" then return end
 
-Toggles.DisableAnticheat:OnChanged(function(Value)
-    if Globals.AnticheatDisabled == true and not Value then
-        if RemotesFolder and RemotesFolder:FindFirstChild("ClimbLadder") then
-            RemotesFolder.ClimbLadder:FireServer()
+    if enable then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+    else
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+    end
+
+    Functions.FireRemote("Crouch", enable, true)
+end
+
+Toggles.PositionSpoof:OnChanged(function(Value)
+    ApplyPositionSpoof(Value)
+end)
+
+Functions.ConnectSignal(RunService.RenderStepped, function()
+    if Toggles.PositionSpoof.Value and RootPart and Humanoid then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+    end
+end)
+
+-- ============================================
+-- VELOCITY MANIPULATION
+-- ============================================
+
+local manipulateBody = nil
+
+local function UpdateVelocityManipulation()
+    if not Toggles.VelocityManipulationToggle.Value or not RootPart then
+        if manipulateBody and manipulateBody.Parent then
+            manipulateBody:Destroy()
+            manipulateBody = nil
         end
-        Globals.AnticheatDisabled = false
+        return
     end
-end)
+
+    if not manipulateBody then
+        manipulateBody = Instance.new("BodyVelocity")
+        manipulateBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        table.insert(Globals.BodyObjects, manipulateBody)
+    end
+
+    if Options.VelocityManipulationMode.Value == "Velocity" then
+        manipulateBody.Parent = RootPart
+        manipulateBody.Velocity = RootPart.CFrame.LookVector * 2.25
+    else
+        manipulateBody.Parent = nil
+        if Character and Floor ~= "Fools" and Floor ~= "OldHotel" then
+            Character:PivotTo(Workspace.CurrentCamera:GetPivot() * CFrame.new(0, 0, 2560))
+        end
+    end
+end
+
+Toggles.VelocityManipulationToggle:OnChanged(UpdateVelocityManipulation)
+Options.VelocityManipulationMode:OnChanged(UpdateVelocityManipulation)
+
+Functions.ConnectSignal(RunService.RenderStepped, UpdateVelocityManipulation)
 
 -- ============================================
--- ОБРАБОТКА ПЕРСОНАЖА (CharacterAdded)
+-- CHARACTER HANDLER
 -- ============================================
 
 local function OnCharacterAdded(newCharacter)
     Character = newCharacter
     Humanoid = newCharacter:WaitForChild("Humanoid", 10)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
-    CollisionPart = newCharacter:FindFirstChild("CollisionPart") or newCharacter:FindFirstChild("Collision")
 
-    -- Speed Boost — применяем сразу
-    if Toggles.SpeedBoostToggle.Value and Humanoid then
+    if not Humanoid or not RootPart then return end
+
+    if Toggles.SpeedBoostToggle.Value then
         Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
     end
 
-    -- Fly — перезапуск
     if Toggles.FlyToggle.Value then
         task.wait(0.5)
         StartFly()
     end
 
-    -- Noclip — перезапуск
     if Toggles.NoclipToggle.Value then
         StartNoclip()
     end
 
-    -- Античит-байпас через лестницу (ВНУТРИ OnCharacterAdded)
-    Character:GetAttributeChangedSignal("Climbing"):Connect(function()
+    Functions.ConnectSignal(Character:GetAttributeChangedSignal("Climbing"), function()
         if Character
             and Character:GetAttribute("Climbing") == true
-            and Toggles.DisableAnticheat
             and Toggles.DisableAnticheat.Value
-            and not Globals.AnticheatDisabled
         then
             task.wait(0.25)
             Character:SetAttribute("Climbing", false)
-            Functions.Notify({ Title = "Античит отключён", Body = "Теперь Speed Boost работает" })
-            Globals.AnticheatDisabled = true
+            Functions.Notify({ Title = "Anticheat", Body = "Bypassed" })
         end
     end)
 end
@@ -503,10 +472,10 @@ end
 if LocalPlayer.Character then
     OnCharacterAdded(LocalPlayer.Character)
 end
-LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+Functions.ConnectSignal(LocalPlayer.CharacterAdded, OnCharacterAdded)
 
 -- ============================================
--- SaveManager / ThemeManager
+-- SAVE / THEME
 -- ============================================
 
 if SaveManager then
@@ -522,60 +491,57 @@ if ThemeManager then
 end
 
 -- ============================================
--- UNLOAD (кнопка выгрузки скрипта)
+-- UNLOAD
 -- ============================================
 
 local Settings_Misc = Tabs.Settings:AddLeftGroupbox("Misc")
 
 Settings_Misc:AddButton({
     Text = "Unload Script",
-    Tooltip = "Полностью выгружает tokagod и очищает все соединения",
+    Tooltip = "Полностью выгружает скрипт",
     DoubleClick = true,
     Risky = true,
     Func = function()
+        StopFly()
+        StopNoclip()
+        Functions.DisconnectAll()
+        Functions.CleanupBodyObjects()
+
         if Library and Library.Unload then
             Library:Unload()
         end
-        if shared then
-            shared.tokagod = nil
-        end
-        if getgenv then
-            getgenv().tokagod = nil
-        end
-        print("[tokagod] Выгружен")
+
+        if shared then shared.tokagod = nil end
+        if getgenv then getgenv().tokagod = nil end
+
+        print("[tokagod] Unloaded")
     end
 })
 
 Library:OnUnload(function()
-    if Toggles.SpeedBoostToggle then
-        pcall(function() Toggles.SpeedBoostToggle:SetValue(false) end)
-    end
-    if Toggles.FlyToggle then
-        pcall(function() Toggles.FlyToggle:SetValue(false) end)
-    end
-    if Toggles.NoclipToggle then
-        pcall(function() Toggles.NoclipToggle:SetValue(false) end)
-    end
-    if StopFly then pcall(StopFly) end
-    if StopNoclip then pcall(StopNoclip) end
+    StopFly()
+    StopNoclip()
+    Functions.DisconnectAll()
+    Functions.CleanupBodyObjects()
 
-    -- Восстанавливаем скорость
+    pcall(function() Toggles.SpeedBoostToggle:SetValue(false) end)
+    pcall(function() Toggles.FlyToggle:SetValue(false) end)
+    pcall(function() Toggles.NoclipToggle:SetValue(false) end)
+
     if Humanoid then
         pcall(function() Humanoid.WalkSpeed = 15 end)
-    end
-    if Humanoid then
         pcall(function() Humanoid.PlatformStand = false end)
     end
 
-    print("[tokagod] Функции выключены")
+    print("[tokagod] Cleaned up")
 end)
 
 -- ============================================
--- ЗАГРУЗКА
+-- BOOT
 -- ============================================
 
 Functions.Notify({
-    Title = "tokagod загружен",
-    Body = "Нажми RightShift чтобы открыть меню",
+    Title = "tokagod loaded",
+    Body = "Press RightShift to open menu",
     Time = 5
 })

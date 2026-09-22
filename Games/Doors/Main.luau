@@ -36,6 +36,12 @@ local Window = Library:CreateWindow({
     CornerRadius = 6,
 })
 
+-- ============================================
+-- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ (RightShift)
+-- ============================================
+
+Library.ToggleKeybind = Enum.KeyCode.RightShift
+
 -- ВКЛАДКИ
 local Tabs = {
     General   = Window:AddTab("General", "house"),

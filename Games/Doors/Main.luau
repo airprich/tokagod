@@ -23,6 +23,12 @@ Functions.Notify = function(Settings)
     })
 end
 
+-- ============================================
+-- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ (RightShift)
+-- ============================================
+
+Library.ToggleKeybind = Enum.KeyCode.RightShift
+
 -- ОКНО
 local Window = Library:CreateWindow({
     Title = "tokagod",
@@ -35,12 +41,6 @@ local Window = Library:CreateWindow({
     MenuFadeTime = 0,
     CornerRadius = 6,
 })
-
--- ============================================
--- КЕЙБИНД ДЛЯ ОТКРЫТИЯ МЕНЮ (RightShift)
--- ============================================
-
-Library.ToggleKeybind = Enum.KeyCode.RightShift
 
 -- ВКЛАДКИ
 local Tabs = {
@@ -140,6 +140,6 @@ end
 
 Functions.Notify({
     Title = "tokagod загружен",
-    Body = "Время: " .. (tokagod.LoadTime or "?") .. "s",
+    Body = "Нажми RightShift чтобы открыть меню",
     Time = 5
 })

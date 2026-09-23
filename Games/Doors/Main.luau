@@ -329,6 +329,17 @@ local ESP = {
     ScanInterval = 0.5,
 }
 
+local Objects = {
+    Entities = {},
+    Doors = {},
+    Items = {},
+    Chests = {},
+    Currency = {},
+    Ladders = {},
+    Objectives = {},
+    HidingSpots = {},
+}
+
 -- === Справочники ===
 local ItemNames = {
     ["DinkyLamp"]="Lamp",["BottleCrate"]="18+ Bottles",["GweenSodaPack"]="Gween Soda Pack",
@@ -356,20 +367,40 @@ local ItemNames = {
     ["Donut"]="Donut",["Lotus"]="Lotus",["BoxingGloves"]="Boxing Gloves"
 }
 
-local EntityAliases = {
-    ["StemsEntity"]="Balls",["NoiseModel"]="Noise",["Creak"]="Creak",
-    ["DronesStampede"]="DronesStampede",["TellerRig"]="Teller",
-    ["Scribbles"]="Scribbles",["BashMoving"]="Bash",["RushMoving"]="Rush",
-    ["AmbushMoving"]="Ambush",["Eyes"]="Eyes",["Lookman"]="Eyes",
-    ["BackdoorRush"]="Blitz",["BackdoorLookman"]="Lookman",
-    ["Groundskeeper"]="Groundskeeper",["A60"]="A-60",["A120"]="A-120",
-    ["GloombatSwarm"]="Gloombat Swarm",["GlitchRush"]="RNIUSHCG==",
-    ["GlitchAmbush"]="AR0xMBUSH",["MonumentEntity"]="Monument",
-    ["JeffTheKiller"]="Jeff the Killer",["CustomEntity"]="Custom Entity",
-    ["FrozenAmbush"]="Frozen Ambush",["SallyMoving"]="Sally",
-    ["Snare"]="Snare",["GiggleCeiling"]="Giggle",["GrumbleRig"]="Grumble",
-    ["LiveEntityBramble"]="Bramble",["Figure"]="Figure",["FigureRig"]="Figure",
-    ["FigureRagdoll"]="Figure",["DoorFake"]="Dupe",["FakeDoor"]="Dupe"
+local Entities = {
+    ["StemsEntity"]={Alias="Balls"},
+    ["NoiseModel"]={Alias="Noise"},
+    ["Creak"]={Alias="Creak"},
+    ["DronesStampede"]={Alias="DronesStampede"},
+    ["TellerRig"]={Alias="Teller"},
+    ["Scribbles"]={Alias="Scribbles"},
+    ["BashMoving"]={Alias="Bash"},
+    ["RushMoving"]={Alias="Rush"},
+    ["AmbushMoving"]={Alias="Ambush"},
+    ["Eyes"]={Alias="Eyes"},
+    ["Lookman"]={Alias="Eyes"},
+    ["BackdoorRush"]={Alias="Blitz"},
+    ["BackdoorLookman"]={Alias="Lookman"},
+    ["Groundskeeper"]={Alias="Groundskeeper"},
+    ["A60"]={Alias="A-60"},
+    ["A120"]={Alias="A-120"},
+    ["GloombatSwarm"]={Alias="Gloombat Swarm"},
+    ["GlitchRush"]={Alias="RNIUSHCG=="},
+    ["GlitchAmbush"]={Alias="AR0xMBUSH"},
+    ["MonumentEntity"]={Alias="Monument"},
+    ["JeffTheKiller"]={Alias="Jeff the Killer"},
+    ["CustomEntity"]={Alias="Custom Entity"},
+    ["FrozenAmbush"]={Alias="Frozen Ambush"},
+    ["SallyMoving"]={Alias="Sally"},
+    ["Snare"]={Alias="Snare"},
+    ["GiggleCeiling"]={Alias="Giggle"},
+    ["GrumbleRig"]={Alias="Grumble"},
+    ["LiveEntityBramble"]={Alias="Bramble"},
+    ["Figure"]={Alias="Figure"},
+    ["FigureRig"]={Alias="Figure"},
+    ["FigureRagdoll"]={Alias="Figure"},
+    ["DoorFake"]={Alias="Dupe"},
+    ["FakeDoor"]={Alias="Dupe"}
 }
 
 local HidingSpotLabels = {
@@ -498,8 +529,8 @@ local function ClassifyObject(Object)
         return "Ladders", "Ladder", Object
     end
 
-    if EntityAliases[Name] then
-        return "Entities", EntityAliases[Name], Object
+    if Entities[Name] then
+        return "Entities", Entities[Name].Alias, Object
     end
 
     return nil, nil, nil
@@ -579,6 +610,90 @@ Functions.ConnectSignal(RunService.Heartbeat, function()
     if tick() - ESP.LastScan < ESP.ScanInterval then return end
     ESP.LastScan = tick()
     ScanAndUpdate()
+end)
+
+-- === Обработчик спавна сущностей (1-в-1 из Abysall) ===
+local RusherAliases = {
+    Rush=true, Bash=true, Scribbles=true, DronesStampede=true, Ambush=true,
+    Eyes=true, Lookman=true, Blitz=true, ["A-60"]=true, ["A-120"]=true,
+    ["AR0xMBUSH"]=true, ["RNIUSHCG=="]=true, ["Custom Entity"]=true
+}
+
+local function HandleEntitySpawn(Entity)
+    if not Entity or typeof(Entity) ~= "Instance" then return end
+
+    local Model = Entity
+    if Entity:IsA("Humanoid") then
+        Model = Entity.Parent
+    end
+    if not Model or not Model:IsA("Model") then return end
+
+    local EntityData = Entities[Model.Name]
+    if not EntityData then return end
+    if Model:GetAttribute("tokagod_EntityHandled") then return end
+    Model:SetAttribute("tokagod_EntityHandled", true)
+
+    while not Model.PrimaryPart do
+        for _, Child in Model:GetChildren() do
+            if Child:IsA("BasePart") then Model.PrimaryPart = Child end
+        end
+        if not Model.PrimaryPart then task.wait() end
+    end
+    task.wait(0.1)
+
+    if not Model.PrimaryPart or LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
+
+    local Alias = EntityData.Alias
+    local RealAlias = Alias
+
+    -- Уведомление (только если включён NotifyEntities — но у нас его нет, пропускаем)
+
+    if Model.Name ~= "GloombatSwarm" then
+        if Toggles.EntityESPToggle.Value and Options.EntityESPOptions.Value[RealAlias] then
+            if Model.Name == "MonumentEntity" then
+                Functions.AddESP({
+                    Object = Model.Top,
+                    Text = Alias,
+                    Color = Options.EntityESPColor.Value
+                })
+            else
+                Functions.AddESP({
+                    Object = Model,
+                    Text = Alias,
+                    Color = Options.EntityESPColor.Value
+                })
+            end
+        end
+        table.insert(Objects.Entities, Model)
+    end
+
+    if RusherAliases[EntityData.Alias] then
+        Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
+        local Root = Model.PrimaryPart
+        if Root then
+            Root.Transparency = 0.999
+            Root.Material = Enum.Material.Plastic
+        end
+    end
+
+    if Model.Name == "Lookman" then
+        CurrentRooms.ChildAdded:Wait()
+        task.wait(10)
+        Model:Destroy()
+    end
+end
+
+Functions.ConnectSignal(Workspace.ChildAdded, function(Child)
+    HandleEntitySpawn(Child)
+end)
+
+Functions.ConnectSignal(Workspace.DescendantAdded, function(Descendant)
+    local EntityModel = Descendant:IsA("Humanoid") and Descendant.Parent or Descendant
+    if EntityModel and EntityModel:IsA("Model") and Entities[EntityModel.Name] then
+        task.defer(function()
+            HandleEntitySpawn(Descendant)
+        end)
+    end
 end)
 
 -- === Player ESP (отдельно) ===

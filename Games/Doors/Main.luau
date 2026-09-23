@@ -406,21 +406,20 @@ local function ClassifyObject(Object)
 
     -- Door — берём структуру из Abysall (HighlightModel + weld к Door.Door)
     if Name == "Door" and Object:IsA("Model") and Object.Parent and tonumber(Object.Parent.Name) then
-        local existing = Object:FindFirstChild("HighlightModel")
-        local target
-
-        if existing and existing:FindFirstChild("HighlightPart") then
-            target = existing.HighlightPart
-        else
-            local DoorParts = {}
-            for _, Child in Object:GetChildren() do
-                if Child.Name == "Door" and Child:IsA("BasePart") then
-                    table.insert(DoorParts, Child)
-                end
+        -- Логика из Abysall 1-в-1
+        local DoorParts = {}
+        for _, Child in Object:GetChildren() do
+            if Child.Name == "Door" and Child:IsA("BasePart") then
+                table.insert(DoorParts, Child)
             end
+        end
 
-            if #DoorParts == 2 then
-                local HighlightModel = Instance.new("Model", Object)
+        local target
+        if #DoorParts == 2 then
+            -- Создаём HighlightModel (как в Abysall)
+            local HighlightModel = Object:FindFirstChild("HighlightModel")
+            if not HighlightModel then
+                HighlightModel = Instance.new("Model", Object)
                 HighlightModel.Name = "HighlightModel"
                 local hum = Instance.new("Humanoid", HighlightModel)
                 hum.Name = "HighlightHumanoid"
@@ -438,35 +437,32 @@ local function ClassifyObject(Object)
                     local W = Instance.new("WeldConstraint", HP)
                     W.Part0 = HP W.Part1 = DoorPart W.Enabled = true
                 end
-
-                target = HighlightModel
-            else
+            end
+            target = HighlightModel
+        else
+            -- Одна створка — создаём HighlightPart (как в Abysall)
+            local HP = Object:FindFirstChild("HighlightPart")
+            if not HP then
                 local Root = Object:WaitForChild("Door", 9e9)
-                if Root and Root:IsA("BasePart") then
-                    local HP = Instance.new("Part", Object)
-                    HP.Transparency = 0.999
-                    HP.Size = Root.Size
-                    HP.CanCollide = false
-                    HP.CFrame = Root.CFrame
-                    HP.Name = "HighlightPart"
-                    HP.Material = Enum.Material.Plastic
-                    HP:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
-                    local W = Instance.new("WeldConstraint", HP)
-                    W.Part0 = HP W.Part1 = Root W.Enabled = true
-                    Instance.new("Humanoid", Object).Name = "HighlightHumanoid"
-                    target = HP
-                else
+                if not Root or not Root:IsA("BasePart") then
                     return nil, nil, nil
                 end
+                HP = Instance.new("Part", Object)
+                HP.Transparency = 0.999
+                HP.Size = Root.Size
+                HP.CanCollide = false
+                HP.CFrame = Root.CFrame
+                HP.Name = "HighlightPart"
+                HP.Material = Enum.Material.Plastic
+                HP:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
+                local W = Instance.new("WeldConstraint", HP)
+                W.Part0 = HP W.Part1 = Root W.Enabled = true
+                Instance.new("Humanoid", Object).Name = "HighlightHumanoid"
             end
+            target = HP
         end
 
         return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), target
-    end
-            end)
-        end
-
-        return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), highlight
     end
 
     if ObjectiveLabels[Name] then

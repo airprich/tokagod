@@ -228,15 +228,77 @@ Functions.GetCurrentSpeed = function()
     return Speed
 end
 
-local function UpdateSpeed()
-    if Humanoid then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + (Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value or 0)
+-- === BodyVelocity для ускорения (НЕ трогаем WalkSpeed) ===
+local SpeedBody = Instance.new("BodyVelocity")
+SpeedBody.Name = "tokagod_SpeedBody"
+SpeedBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+SpeedBody.P = 1250
+SpeedBody.Parent = nil
+table.insert(Globals.BodyObjects, SpeedBody)
+
+-- Лимит буста (выше — ловит античит)
+local MAX_BOOST = 25
+
+-- Спам Crouch (античит думает "стою")
+local LastCrouchFire = 0
+local CROUCH_DELAY = 0.1
+
+Functions.ConnectSignal(RunService.RenderStepped, function()
+    if not Character or not Humanoid or not RootPart then return end
+
+    -- WalkSpeed НЕ ТРОГАЕМ! Игра сама им управляет, включая Seek-ускорение.
+
+    if not Toggles.SpeedBoostToggle.Value then
+        if SpeedBody.Parent then SpeedBody.Parent = nil end
+        return
     end
-    Functions.FireRemote("Crouch", false, true)
+
+    local MoveDir = Humanoid.MoveDirection
+    if MoveDir.Magnitude < 0.05 then
+        if SpeedBody.Parent then SpeedBody.Parent = nil end
+        return
+    end
+
+    -- Дополнительная скорость сверху того, что даёт игра
+    local Extra = math.min(Options.SpeedBoost.Value or 0, MAX_BOOST)
+    if Extra <= 0 then
+        if SpeedBody.Parent then SpeedBody.Parent = nil end
+        return
+    end
+
+    SpeedBody.Parent = RootPart
+    SpeedBody.Velocity = MoveDir.Unit * Extra
+
+    -- Спамим Crouch — античит видит "игрок крадётся"
+    if tick() - LastCrouchFire > CROUCH_DELAY then
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            pcall(function()
+                RemotesFolder.Crouch:FireServer(true, true)
+            end)
+        end
+        LastCrouchFire = tick()
+    end
+end)
+
+-- === Hook на Crouch FireServer ===
+if tokagod.Environment and tokagod.Environment.hookmetamethod then
+    local OldNamecall
+    OldNamecall = tokagod.Environment.hookmetamethod(game, "__namecall",
+        tokagod.Environment.newcclosure(function(Self, ...)
+            local Args = { ... }
+            local Method = tokagod.Environment.getnamecallmethod()
+            if Self.Name == "Crouch" and Method == "FireServer" then
+                Args[1] = true  -- "крадусь"
+                Args[2] = true  -- "стою"
+            end
+            return OldNamecall(Self, table.unpack(Args))
+        end))
 end
 
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
-    UpdateSpeed()
+    if not Value and SpeedBody.Parent then
+        SpeedBody.Parent = nil
+    end
     Functions.Notify({
         Title = "Speed Boost",
         Body = Value and "Включено" or "Выключено"
@@ -244,14 +306,10 @@ Toggles.SpeedBoostToggle:OnChanged(function(Value)
 end)
 
 Options.SpeedBoost:OnChanged(function()
-    if Toggles.SpeedBoostToggle.Value then
-        UpdateSpeed()
-    end
-end)
-
-Functions.ConnectSignal(RunService.Heartbeat, function()
-    if Toggles.SpeedBoostToggle.Value and Humanoid then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
+    if Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value > 25 then
+        if not Toggles.PositionSpoof.Value then
+            Toggles.PositionSpoof:SetValue(true)
+        end
     end
 end)
 

@@ -188,7 +188,8 @@ Groupboxes.General_Character:AddDropdown("VelocityManipulationMode", {
 })
 
 -- ============================================
--- SPEED LOGIC
+-- SPEED LOGIC + POSITION SPOOF + ANTICHEAT BYPASS
+-- Технология Abysall, улучшенная версия
 -- ============================================
 
 Functions.IsCrouching = function()
@@ -196,8 +197,8 @@ Functions.IsCrouching = function()
     if Floor == "Fools" or Floor == "OldHotel" then
         return Character:GetAttribute("Crouching") == true
     end
-    local CollisionPart = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
-    return CollisionPart and CollisionPart.CollisionGroup == "PlayerCrouching" or false
+    local CP = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
+    return CP and CP.CollisionGroup == "PlayerCrouching" or false
 end
 
 Functions.GetInjuriesSpeed = function()
@@ -229,7 +230,7 @@ Functions.GetCurrentSpeed = function()
     return Speed
 end
 
--- === BodyVelocity для ускорения (НЕ трогаем WalkSpeed) ===
+-- === SpeedBody (BodyVelocity вместо WalkSpeed) ===
 local SpeedBody = Instance.new("BodyVelocity")
 SpeedBody.Name = "tokagod_SpeedBody"
 SpeedBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
@@ -237,75 +238,113 @@ SpeedBody.P = 1250
 SpeedBody.Parent = nil
 table.insert(Globals.BodyObjects, SpeedBody)
 
--- Лимит буста (выше — ловит античит)
-local MAX_BOOST = 25
+-- === SpoofState ===
+local SpoofState = {
+    Applied = false,
+    LastCrouchFire = 0,
+}
 
--- Спам Crouch (античит думает "стою")
-local LastCrouchFire = 0
+-- Максимальная безопасная скорость (выше — античит палит)
+local MAX_BOOST = 25
 local CROUCH_DELAY = 0.1
 
+-- === Hook на Crouch FireServer (главный обход) ===
+if tokagod.Environment
+   and tokagod.Environment.hookmetamethod
+   and tokagod.Environment.newcclosure
+   and tokagod.Environment.getnamecallmethod
+then
+    local OldNamecall
+    OldNamecall = tokagod.Environment.hookmetamethod(
+        game, "__namecall",
+        tokagod.Environment.newcclosure(function(Self, ...)
+            local Args = { ... }
+            local Method = tokagod.Environment.getnamecallmethod()
+
+            -- Всегда "крадусь, не двигаюсь"
+            if Self.Name == "Crouch" and Method == "FireServer" then
+                Args[1] = true
+                Args[2] = true
+            end
+
+            return OldNamecall(Self, table.unpack(Args))
+        end)
+    )
+end
+
+-- === Main Loop: Speed + Spoof ===
 Functions.ConnectSignal(RunService.RenderStepped, function()
     if not Character or not Humanoid or not RootPart then return end
 
-    -- WalkSpeed НЕ ТРОГАЕМ! Игра сама им управляет, включая Seek-ускорение.
+    -- WalkSpeed НЕ трогаем! Игра сама управляет им, включая Seek-ускорение.
 
-    if not Toggles.SpeedBoostToggle.Value then
-        if SpeedBody.Parent then SpeedBody.Parent = nil end
-        return
+    -- === SPEED BOOST через BodyVelocity ===
+    if Toggles.SpeedBoostToggle.Value then
+        local MoveDir = Humanoid.MoveDirection
+        if MoveDir.Magnitude > 0.05 then
+            local Extra = math.min(Options.SpeedBoost.Value or 0, MAX_BOOST)
+            if Extra > 0 then
+                SpeedBody.Parent = RootPart
+                SpeedBody.Velocity = MoveDir.Unit * Extra
+            else
+                SpeedBody.Parent = nil
+            end
+        else
+            SpeedBody.Parent = nil
+        end
+    else
+        SpeedBody.Parent = nil
     end
 
-    local MoveDir = Humanoid.MoveDirection
-    if MoveDir.Magnitude < 0.05 then
-        if SpeedBody.Parent then SpeedBody.Parent = nil end
-        return
+    -- === POSITION SPOOF ===
+    if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
+        -- RootPart визуально под пол (один раз)
+        if not SpoofState.Applied then
+            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+            Humanoid.HipHeight = 0.05
+            SpoofState.Applied = true
+        end
+
+        -- Collision всегда над RootPart
+        local Collision = Character:FindFirstChild("Collision")
+        local CollisionPart = Character:FindFirstChild("CollisionPart")
+
+        if Collision then
+            Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+        end
+        if CollisionPart then
+            CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+        end
+    elseif SpoofState.Applied and not Toggles.PositionSpoof.Value then
+        -- Отключаем спуф
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+        SpoofState.Applied = false
     end
 
-    -- Дополнительная скорость сверху того, что даёт игра
-    local Extra = math.min(Options.SpeedBoost.Value or 0, MAX_BOOST)
-    if Extra <= 0 then
-        if SpeedBody.Parent then SpeedBody.Parent = nil end
-        return
-    end
-
-    SpeedBody.Parent = RootPart
-    SpeedBody.Velocity = MoveDir.Unit * Extra
-
-    -- Спамим Crouch — античит видит "игрок крадётся"
-    if tick() - LastCrouchFire > CROUCH_DELAY then
+    -- === Crouch spam ===
+    if tick() - SpoofState.LastCrouchFire > CROUCH_DELAY then
         if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
             pcall(function()
                 RemotesFolder.Crouch:FireServer(true, true)
             end)
         end
-        LastCrouchFire = tick()
+        SpoofState.LastCrouchFire = tick()
     end
 end)
 
--- === Hook на Crouch FireServer ===
-if tokagod.Environment and tokagod.Environment.hookmetamethod then
-    local OldNamecall
-    OldNamecall = tokagod.Environment.hookmetamethod(game, "__namecall",
-        tokagod.Environment.newcclosure(function(Self, ...)
-            local Args = { ... }
-            local Method = tokagod.Environment.getnamecallmethod()
-            if Self.Name == "Crouch" and Method == "FireServer" then
-                Args[1] = true  -- "крадусь"
-                Args[2] = true  -- "стою"
-            end
-            return OldNamecall(Self, table.unpack(Args))
-        end))
-end
-
+-- === SpeedBoost toggle ===
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
     if not Value and SpeedBody.Parent then
         SpeedBody.Parent = nil
     end
     Functions.Notify({
         Title = "Speed Boost",
-        Body = Value and "Включено" or "Выключено"
+        Body = Value and "Enabled" or "Disabled"
     })
 end)
 
+-- === Авто-включение PositionSpoof при SpeedBoost > 25 ===
 Options.SpeedBoost:OnChanged(function()
     if Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value > 25 then
         if not Toggles.PositionSpoof.Value then

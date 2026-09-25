@@ -25,6 +25,7 @@ local Options = Library.Options
 local Functions = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CurrentRooms = Workspace:FindFirstChild("CurrentRooms")
 local Floor = ReplicatedStorage:WaitForChild("GameData"):WaitForChild("Floor").Value
 local LiveModifiers = ReplicatedStorage:FindFirstChild("LiveModifiers")
 local RemotesFolder = ReplicatedStorage:FindFirstChild("RemotesFolder")
@@ -310,6 +311,61 @@ Options.SpeedBoost:OnChanged(function()
         if not Toggles.PositionSpoof.Value then
             Toggles.PositionSpoof:SetValue(true)
         end
+    end
+end)
+
+-- ============================================
+-- POSITION SPOOF (правильный — Collision над RootPart)
+-- ============================================
+
+local SpoofState = {
+    Applied = false,
+    LastCrouch = 0,
+}
+
+Toggles.PositionSpoof:OnChanged(function(Value)
+    if not RootPart or not Humanoid then return end
+    if Floor == "Fools" or Floor == "OldHotel" then return end
+
+    if Value and not SpoofState.Applied then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+        SpoofState.Applied = true
+    elseif not Value and SpoofState.Applied then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+        SpoofState.Applied = false
+    end
+end)
+
+Functions.ConnectSignal(RunService.RenderStepped, function()
+    if not Toggles.PositionSpoof.Value then return end
+    if not RootPart or not Humanoid or not Character then return end
+    if Floor == "Fools" or Floor == "OldHotel" then return end
+
+    -- RootPart визуально под пол
+    RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+    Humanoid.HipHeight = 0.05
+
+    -- Collision/ CollisionPart ВСЕГДА на 2.328 выше RootPart
+    local Collision = Character:FindFirstChild("Collision")
+    local CollisionPart = Character:FindFirstChild("CollisionPart")
+
+    if Collision then
+        Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+    end
+    if CollisionPart then
+        CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+    end
+
+    -- Спамим Crouch каждые 0.1 сек
+    if tick() - SpoofState.LastCrouch > 0.1 then
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            pcall(function()
+                RemotesFolder.Crouch:FireServer(true, true)
+            end)
+        end
+        SpoofState.LastCrouch = tick()
     end
 end)
 
@@ -898,10 +954,6 @@ local function StartNoclip()
 
         Functions.FireRemote("Crouch", true, true)
 
-        if Toggles.PositionSpoof.Value and RootPart and Humanoid then
-            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-            Humanoid.HipHeight = 0.05
-        end
     end)
 end
 
@@ -929,35 +981,6 @@ Toggles.NoclipToggle:OnChanged(function(Value)
     else
         StopNoclip()
         Functions.Notify({ Title = "Noclip", Body = "Выключено" })
-    end
-end)
-
--- ============================================
--- POSITION SPOOF
--- ============================================
-
-local function ApplyPositionSpoof(enable)
-    if not RootPart or not Humanoid or Floor == "Fools" or Floor == "OldHotel" then return end
-
-    if enable then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-        Humanoid.HipHeight = 0.05
-    else
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-        Humanoid.HipHeight = 2.396
-    end
-
-    Functions.FireRemote("Crouch", enable, true)
-end
-
-Toggles.PositionSpoof:OnChanged(function(Value)
-    ApplyPositionSpoof(Value)
-end)
-
-Functions.ConnectSignal(RunService.RenderStepped, function()
-    if Toggles.PositionSpoof.Value and RootPart and Humanoid then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-        Humanoid.HipHeight = 0.05
     end
 end)
 
@@ -1015,10 +1038,6 @@ local function OnCharacterAdded(newCharacter)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
 
     if not Humanoid or not RootPart then return end
-
-    if Toggles.SpeedBoostToggle.Value then
-        Humanoid.WalkSpeed = Functions.GetCurrentSpeed() + Options.SpeedBoost.Value
-    end
 
     if Toggles.FlyToggle.Value then
         task.wait(0.5)

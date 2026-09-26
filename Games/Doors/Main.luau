@@ -100,7 +100,7 @@ end
 -- ============================================
 
 local Window = Library:CreateWindow({
-    Title = "?",
+    Title = "?,,,,,,",
     Footer = "dsc.gg/?????",
     NotifySide = "Right",
     ShowCustomCursor = false,

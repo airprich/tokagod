@@ -3,6 +3,7 @@
 local tokagod = getgenv().tokagod
 local Globals = {
     Connections = {},
+    CharacterConnections = {},
     BodyObjects = {},
     Active = {},
     ESPConnections = {},
@@ -32,7 +33,7 @@ local RemotesFolder = ReplicatedStorage:FindFirstChild("RemotesFolder")
     or ReplicatedStorage:FindFirstChild("EntityInfo")
     or ReplicatedStorage:FindFirstChild("Bricks")
 
-local Character, Humanoid, RootPart
+local Character, Humanoid, RootPart, Collision, CollisionPart
 
 -- ============================================
 -- UTILITY
@@ -68,6 +69,21 @@ Functions.CleanupBodyObjects = function()
         end
     end
     Globals.BodyObjects = {}
+end
+
+Functions.ConnectCharacterSignal = function(signal, callback)
+    local conn = signal:Connect(callback)
+    table.insert(Globals.CharacterConnections, conn)
+    return conn
+end
+
+Functions.DisconnectCharacterConnections = function()
+    for _, conn in ipairs(Globals.CharacterConnections) do
+        if conn and conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    Globals.CharacterConnections = {}
 end
 
 Functions.FireRemote = function(remoteName, ...)
@@ -232,27 +248,59 @@ end
 
 -- === Movement State ===
 local MovementState = {
-    SpeedBody = Instance.new("BodyVelocity"),
     SpoofState = {
         Applied = false,
         LastCrouchFire = 0,
-        LastCrouch = 0,
     },
-    MaxBoost = 25,
     CrouchDelay = 0.1,
+    LastSpeedUpdate = 0,
+    LastSpeedState = "",
 }
 
-MovementState.SpeedBody.Name = "tokagod_SpeedBody"
-MovementState.SpeedBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-MovementState.SpeedBody.P = 1250
-MovementState.SpeedBody.Parent = nil
-table.insert(Globals.BodyObjects, MovementState.SpeedBody)
+Functions.GetSpeedStateKey = function()
+    local key = Floor or ""
+
+    if Character then
+        key = key
+            .. ":" .. tostring(Character:GetAttribute("SpeedBoost") or 0)
+            .. ":" .. tostring(Character:GetAttribute("SpeedBoostBehind") or 0)
+            .. ":" .. tostring(Character:GetAttribute("SpeedBoostExtra") or 0)
+            .. ":" .. tostring(Character:GetAttribute("Crouching") or false)
+    end
+
+    if LiveModifiers then
+        local modifiers = {}
+        for _, mod in ipairs(LiveModifiers:GetChildren()) do
+            if mod:IsA("BoolValue") then
+                table.insert(modifiers, mod.Name .. ":" .. tostring(mod.Value))
+            end
+        end
+        table.sort(modifiers)
+        key = key .. ":" .. table.concat(modifiers, ",")
+    end
+
+    return key
+end
 
 local function ApplyPositionSpoof(Enabled)
     if not RootPart or not Humanoid then return end
+    local spoofPart = CollisionPart or Collision or RootPart
+
     if Floor == "Fools" or Floor == "OldHotel" then
-        if MovementState.SpoofState.Applied then
-            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        if Enabled and not MovementState.SpoofState.Applied then
+            if spoofPart and spoofPart:IsA("BasePart") then
+                spoofPart.CFrame = spoofPart.CFrame * CFrame.new(0, -2.346, 0)
+            else
+                RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+            end
+            Humanoid.HipHeight = 0.05
+            MovementState.SpoofState.Applied = true
+        elseif not Enabled and MovementState.SpoofState.Applied then
+            if spoofPart and spoofPart:IsA("BasePart") then
+                spoofPart.CFrame = spoofPart.CFrame * CFrame.new(0, 2.346, 0)
+            else
+                RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+            end
             Humanoid.HipHeight = 2.396
             MovementState.SpoofState.Applied = false
         end
@@ -270,6 +318,17 @@ local function ApplyPositionSpoof(Enabled)
     end
 end
 
+local function UpdateSpeedBoost()
+    if not Humanoid then return end
+
+    local baseSpeed = Functions.GetCurrentSpeed()
+    local boost = Options.SpeedBoost.Value or 0
+
+    if Toggles.SpeedBoostToggle.Value then
+        Humanoid.WalkSpeed = baseSpeed + boost
+    end
+end
+
 -- === Hook на Crouch FireServer (главный обход) ===
 if tokagod.Environment
    and tokagod.Environment.hookmetamethod
@@ -284,7 +343,9 @@ then
             local Method = tokagod.Environment.getnamecallmethod()
 
             if Self.Name == "Crouch" and Method == "FireServer" then
-                Args[1] = true
+                if Toggles.PositionSpoof.Value then
+                    Args[1] = true
+                end
                 Args[2] = true
             end
 
@@ -297,46 +358,14 @@ end
 Functions.ConnectSignal(RunService.RenderStepped, function()
     if not Character or not Humanoid or not RootPart then return end
 
-    if Toggles.SpeedBoostToggle.Value then
-        local MoveDir = Humanoid.MoveDirection
-        if MoveDir.Magnitude > 0.05 then
-            local Extra = math.min(Options.SpeedBoost.Value or 0, MovementState.MaxBoost)
-            if Extra > 0 then
-                MovementState.SpeedBody.Parent = RootPart
-                MovementState.SpeedBody.Velocity = MoveDir.Unit * Extra
-            else
-                MovementState.SpeedBody.Parent = nil
-            end
-        else
-            MovementState.SpeedBody.Parent = nil
-        end
-    else
-        MovementState.SpeedBody.Parent = nil
+    local speedState = Functions.GetSpeedStateKey()
+    if tick() - MovementState.LastSpeedUpdate >= 0.1 or speedState ~= MovementState.LastSpeedState then
+        UpdateSpeedBoost()
+        MovementState.LastSpeedUpdate = tick()
+        MovementState.LastSpeedState = speedState
     end
 
-    if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
-        if not MovementState.SpoofState.Applied then
-            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-            Humanoid.HipHeight = 0.05
-            MovementState.SpoofState.Applied = true
-        end
-
-        local Collision = Character:FindFirstChild("Collision")
-        local CollisionPart = Character:FindFirstChild("CollisionPart")
-
-        if Collision then
-            Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-        end
-        if CollisionPart then
-            CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-        end
-    elseif MovementState.SpoofState.Applied and not Toggles.PositionSpoof.Value then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-        Humanoid.HipHeight = 2.396
-        MovementState.SpoofState.Applied = false
-    end
-
-    if tick() - MovementState.SpoofState.LastCrouchFire > MovementState.CrouchDelay then
+    if Toggles.PositionSpoof.Value and tick() - MovementState.SpoofState.LastCrouchFire > MovementState.CrouchDelay then
         if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
             pcall(function()
                 RemotesFolder.Crouch:FireServer(true, true)
@@ -348,23 +377,14 @@ end)
 
 -- === SpeedBoost toggle ===
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
-    if not Value and MovementState.SpeedBody.Parent then
-        MovementState.SpeedBody.Parent = nil
-    end
+    UpdateSpeedBoost()
     Functions.Notify({
         Title = "Speed Boost",
         Body = Value and "Enabled" or "Disabled"
     })
 end)
 
--- === Авто-включение PositionSpoof при SpeedBoost > 25 ===
-Options.SpeedBoost:OnChanged(function()
-    if Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value > 25 then
-        if not Toggles.PositionSpoof.Value then
-            Toggles.PositionSpoof:SetValue(true)
-        end
-    end
-end)
+Options.SpeedBoost:OnChanged(UpdateSpeedBoost)
 
 Toggles.PositionSpoof:OnChanged(function(Value)
     ApplyPositionSpoof(Value)
@@ -439,10 +459,16 @@ end)
 
 local ESP = {
     Added = {},
+    Queue = {},
     LastScan = 0,
     LastPlayerScan = 0,
     ScanInterval = 0.5,
 }
+
+local function EnqueueESPObject(Object)
+    if not Object then return end
+    ESP.Queue[Object] = true
+end
 
 local function IsEntitySelected(alias)
     local EntityOptions = Options.EntityESPOptions
@@ -535,6 +561,9 @@ local Entities = {
     ["GloombatSwarm"]={Alias="Gloombat Swarm"},
     ["GlitchRush"]={Alias="RNIUSHCG=="},
     ["GlitchAmbush"]={Alias="AR0xMBUSH"},
+    ["MandrakeHole"]={Alias="Mandrake Hole"},
+    ["GloombatEggs"]={Alias="Gloombat Eggs"},
+    ["GloombatEgg"]={Alias="Gloombat Eggs"},
     ["MonumentEntity"]={Alias="Monument"},
     ["JeffTheKiller"]={Alias="Jeff the Killer"},
     ["CustomEntity"]={Alias="Custom Entity"},
@@ -622,7 +651,7 @@ local function ClassifyObject(Object)
             -- Одна створка — создаём HighlightPart (как в Abysall)
             local HP = Object:FindFirstChild("HighlightPart")
             if not HP then
-                local Root = Object:WaitForChild("Door", 9e9)
+                local Root = Object:WaitForChild("Door", 9)
                 if not Root or not Root:IsA("BasePart") then
                     return nil, nil, nil
                 end
@@ -710,7 +739,13 @@ local ESPColorMap = {
 local function ScanAndUpdate()
     local seen = {}
 
-    for _, Object in ipairs(Workspace:GetDescendants()) do
+    for Object in pairs(ESP.Added) do
+        seen[Object] = true
+    end
+
+    for Object in pairs(ESP.Queue) do
+        ESP.Queue[Object] = nil
+
         local category, label, target = ClassifyObject(Object)
         if category and target then
             seen[target] = true
@@ -719,7 +754,6 @@ local function ScanAndUpdate()
             local colorName  = ESPColorMap[category]
             local isOn = Toggles[toggleName] and Toggles[toggleName].Value
 
-            -- Доп. фильтр для сущностей: проверка по списку
             if isOn and category == "Entities" then
                 if not IsEntitySelected(label) then
                     isOn = false
@@ -778,11 +812,13 @@ local function HandleEntitySpawn(Entity)
     if Model:GetAttribute("tokagod_EntityHandled") then return end
     Model:SetAttribute("tokagod_EntityHandled", true)
 
+    local start = tick()
     while not Model.PrimaryPart do
         for _, Child in Model:GetChildren() do
             if Child:IsA("BasePart") then Model.PrimaryPart = Child end
         end
-        if not Model.PrimaryPart then task.wait() end
+        if tick() - start > 5 then break end
+        if not Model.PrimaryPart then task.wait(0.05) end
     end
     task.wait(0.1)
 
@@ -796,6 +832,14 @@ local function HandleEntitySpawn(Entity)
     if Model.Name ~= "GloombatSwarm" then
         if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
             local ESPTarget = (Model.Name == "MonumentEntity" and Model:FindFirstChild("Top")) or Model
+            AddESPForObject(ESPTarget, Alias, Options.EntityESPColor.Value)
+        end
+        table.insert(Objects.Entities, Model)
+    end
+
+    if Model.Name == "GloombatSwarm" then
+        if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
+            local ESPTarget = Model
             AddESPForObject(ESPTarget, Alias, Options.EntityESPColor.Value)
         end
         table.insert(Objects.Entities, Model)
@@ -822,6 +866,7 @@ Functions.ConnectSignal(Workspace.ChildAdded, function(Child)
 end)
 
 Functions.ConnectSignal(Workspace.DescendantAdded, function(Descendant)
+    EnqueueESPObject(Descendant)
     local EntityModel = Descendant:IsA("Humanoid") and Descendant.Parent or Descendant
     if EntityModel and EntityModel:IsA("Model") and Entities[EntityModel.Name] then
         task.defer(function()
@@ -968,6 +1013,9 @@ local function StartNoclip()
 
         for _, part in ipairs(Character:GetDescendants()) do
             if part:IsA("BasePart") then
+                if part:GetAttribute("tokagod_OriginalCanCollide") == nil then
+                    part:SetAttribute("tokagod_OriginalCanCollide", part.CanCollide)
+                end
                 part.CanCollide = false
             end
         end
@@ -986,7 +1034,13 @@ local function StopNoclip()
     if Character then
         for _, part in ipairs(Character:GetDescendants()) do
             if part:IsA("BasePart") then
-                part.CanCollide = true
+                local originalCanCollide = part:GetAttribute("tokagod_OriginalCanCollide")
+                if originalCanCollide ~= nil then
+                    part.CanCollide = originalCanCollide
+                    part:SetAttribute("tokagod_OriginalCanCollide", nil)
+                else
+                    part.CanCollide = true
+                end
             end
         end
     end
@@ -1041,21 +1095,28 @@ local function UpdateVelocityManipulation()
     end
 end
 
+Functions.ConnectSignal(RunService.RenderStepped, function()
+    if not Toggles.VelocityManipulationToggle.Value then return end
+    UpdateVelocityManipulation()
+end)
+
 Toggles.VelocityManipulationToggle:OnChanged(UpdateVelocityManipulation)
 if Options.VelocityManipulationMode then
     Options.VelocityManipulationMode:OnChanged(UpdateVelocityManipulation)
 end
-
-Functions.ConnectSignal(RunService.RenderStepped, UpdateVelocityManipulation)
 
 -- ============================================
 -- CHARACTER HANDLER
 -- ============================================
 
 local function OnCharacterAdded(newCharacter)
+    Functions.DisconnectCharacterConnections()
+
     Character = newCharacter
     Humanoid = newCharacter:WaitForChild("Humanoid", 10)
     RootPart = newCharacter:WaitForChild("HumanoidRootPart", 10)
+    Collision = newCharacter:FindFirstChild("Collision")
+    CollisionPart = newCharacter:FindFirstChild("CollisionPart")
 
     if not Humanoid or not RootPart then return end
 
@@ -1068,7 +1129,7 @@ local function OnCharacterAdded(newCharacter)
         StartNoclip()
     end
 
-    Functions.ConnectSignal(Character:GetAttributeChangedSignal("Climbing"), function()
+    Functions.ConnectCharacterSignal(Character:GetAttributeChangedSignal("Climbing"), function()
         if Character
             and Character:GetAttribute("Climbing") == true
             and Toggles.DisableAnticheat.Value
@@ -1140,6 +1201,7 @@ Library:OnUnload(function()
 
     if Humanoid then
         pcall(function() Humanoid.WalkSpeed = 15 end)
+        pcall(function() Humanoid.HipHeight = 2.367 end)
         pcall(function() Humanoid.PlatformStand = false end)
     end
 

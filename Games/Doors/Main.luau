@@ -187,196 +187,187 @@ Groupboxes.General_Character:AddDropdown("VelocityManipulationMode", {
     Default = 1,
 })
 
--- ============================================================
--- SPEED SYSTEM v2 (переписано по Abysall)
--- ============================================================
+-- ============================================
+-- SPEED LOGIC + POSITION SPOOF + ANTICHEAT BYPASS
+-- Технология Abysall, улучшенная версия
+-- ============================================
 
-local BASE_WALKSPEED   = 15
-local CROUCH_PENALTY   = 5
-local CROUCH_SLOW_PEN  = 8
-local PARTY_BONUS      = 10
-local INJURY_MULT      = 0.075
-local MAX_SAFE_BOOST   = 15
+Functions.IsCrouching = function()
+    if not Character then return false end
+    if Floor == "Fools" or Floor == "OldHotel" then
+        return Character:GetAttribute("Crouching") == true
+    end
+    local CP = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
+    return CP and CP.CollisionGroup == "PlayerCrouching" or false
+end
 
-local SPEED_MODIFIER_TABLE = {
-	PlayerFast    =  3,
-	PlayerFaster  =  6,
-	PlayerFastest = 20,
-	PlayerSlow    = -3,
+Functions.GetInjuriesSpeed = function()
+    if not Humanoid then return 0 end
+    return 0.075 * (Humanoid.MaxHealth - Humanoid.Health)
+end
+
+Functions.GetCurrentSpeed = function()
+    local Speed = 15
+    if not Character or not Humanoid then return Speed end
+
+    Speed += Character:GetAttribute("SpeedBoost") or 0
+    Speed += Character:GetAttribute("SpeedBoostBehind") or 0
+    Speed += Character:GetAttribute("SpeedBoostExtra") or 0
+    Speed += (Floor == "Party" and 10 or 0)
+
+    if LiveModifiers then
+        Speed += (LiveModifiers:FindFirstChild("PlayerFast") and 3 or 0)
+        Speed += (LiveModifiers:FindFirstChild("PlayerFaster") and 6 or 0)
+        Speed += (LiveModifiers:FindFirstChild("PlayerFastest") and 20 or 0)
+        Speed -= (LiveModifiers:FindFirstChild("PlayerSlow") and 3 or 0)
+        Speed -= (LiveModifiers:FindFirstChild("PlayerSlowHealth") and Functions.GetInjuriesSpeed() or 0)
+    end
+
+    if Functions.IsCrouching() then
+        Speed -= (LiveModifiers and LiveModifiers:FindFirstChild("PlayerCrouchSlow") and 8 or 5)
+    end
+
+    return Speed
+end
+
+-- === Movement State ===
+local MovementState = {
+    SpeedBody = Instance.new("BodyVelocity"),
+    SpoofState = {
+        Applied = false,
+        LastCrouchFire = 0,
+        LastCrouch = 0,
+    },
+    MaxBoost = 25,
+    CrouchDelay = 0.1,
 }
 
-local ActiveModifiers = {
-	PlayerFast = false, PlayerFaster = false, PlayerFastest = false,
-	PlayerSlow = false, PlayerCrouchSlow = false, PlayerSlowHealth = false,
-}
+MovementState.SpeedBody.Name = "tokagod_SpeedBody"
+MovementState.SpeedBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+MovementState.SpeedBody.P = 1250
+MovementState.SpeedBody.Parent = nil
+table.insert(Globals.BodyObjects, MovementState.SpeedBody)
 
-local CharacterCache = {
-	AttrSpeedBoost       = 0,
-	AttrSpeedBoostBehind = 0,
-	AttrSpeedBoostExtra  = 0,
-	IsCrouching          = false,
-}
+local function ApplyPositionSpoof(Enabled)
+    if not RootPart or not Humanoid then return end
+    if Floor == "Fools" or Floor == "OldHotel" then
+        if MovementState.SpoofState.Applied then
+            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+            Humanoid.HipHeight = 2.396
+            MovementState.SpoofState.Applied = false
+        end
+        return
+    end
 
-local function RebuildModifierCache()
-	for name in pairs(ActiveModifiers) do
-		ActiveModifiers[name] = LiveModifiers and LiveModifiers:FindFirstChild(name) ~= nil
-	end
+    if Enabled and not MovementState.SpoofState.Applied then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+        Humanoid.HipHeight = 0.05
+        MovementState.SpoofState.Applied = true
+    elseif not Enabled and MovementState.SpoofState.Applied then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+        MovementState.SpoofState.Applied = false
+    end
 end
 
-local function RefreshCrouchState()
-	if not Character then return end
-	if Floor == "Fools" or Floor == "OldHotel" then
-		CharacterCache.IsCrouching = Character:GetAttribute("Crouching") == true
-	else
-		local CP = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
-		if CP then
-			CharacterCache.IsCrouching = CP.CollisionGroup == "PlayerCrouching"
-		end
-	end
+-- === Hook на Crouch FireServer (главный обход) ===
+if tokagod.Environment
+   and tokagod.Environment.hookmetamethod
+   and tokagod.Environment.newcclosure
+   and tokagod.Environment.getnamecallmethod
+then
+    local OldNamecall
+    OldNamecall = tokagod.Environment.hookmetamethod(
+        game, "__namecall",
+        tokagod.Environment.newcclosure(function(Self, ...)
+            local Args = { ... }
+            local Method = tokagod.Environment.getnamecallmethod()
+
+            if Self.Name == "Crouch" and Method == "FireServer" then
+                Args[1] = true
+                Args[2] = true
+            end
+
+            return OldNamecall(Self, table.unpack(Args))
+        end)
+    )
 end
 
-local function RefreshAttributeCache()
-	if not Character then return end
-	CharacterCache.AttrSpeedBoost       = Character:GetAttribute("SpeedBoost")       or 0
-	CharacterCache.AttrSpeedBoostBehind = Character:GetAttribute("SpeedBoostBehind") or 0
-	CharacterCache.AttrSpeedBoostExtra  = Character:GetAttribute("SpeedBoostExtra")  or 0
-end
+-- === Main Loop: Speed + Spoof ===
+Functions.ConnectSignal(RunService.RenderStepped, function()
+    if not Character or not Humanoid or not RootPart then return end
 
-local function ComputeBaseSpeed()
-	if not Character or not Humanoid then return BASE_WALKSPEED end
+    if Toggles.SpeedBoostToggle.Value then
+        local MoveDir = Humanoid.MoveDirection
+        if MoveDir.Magnitude > 0.05 then
+            local Extra = math.min(Options.SpeedBoost.Value or 0, MovementState.MaxBoost)
+            if Extra > 0 then
+                MovementState.SpeedBody.Parent = RootPart
+                MovementState.SpeedBody.Velocity = MoveDir.Unit * Extra
+            else
+                MovementState.SpeedBody.Parent = nil
+            end
+        else
+            MovementState.SpeedBody.Parent = nil
+        end
+    else
+        MovementState.SpeedBody.Parent = nil
+    end
 
-	local speed = BASE_WALKSPEED
-		+ CharacterCache.AttrSpeedBoost
-		+ CharacterCache.AttrSpeedBoostBehind
-		+ CharacterCache.AttrSpeedBoostExtra
+    if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
+        if not MovementState.SpoofState.Applied then
+            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+            Humanoid.HipHeight = 0.05
+            MovementState.SpoofState.Applied = true
+        end
 
-	if Floor == "Party" then
-		speed += PARTY_BONUS
-	end
+        local Collision = Character:FindFirstChild("Collision")
+        local CollisionPart = Character:FindFirstChild("CollisionPart")
 
-	for name, bonus in pairs(SPEED_MODIFIER_TABLE) do
-		if ActiveModifiers[name] then
-			speed += bonus
-		end
-	end
+        if Collision then
+            Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+        end
+        if CollisionPart then
+            CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+        end
+    elseif MovementState.SpoofState.Applied and not Toggles.PositionSpoof.Value then
+        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+        Humanoid.HipHeight = 2.396
+        MovementState.SpoofState.Applied = false
+    end
 
-	if ActiveModifiers.PlayerSlowHealth then
-		speed -= INJURY_MULT * (Humanoid.MaxHealth - Humanoid.Health)
-	end
-
-	if CharacterCache.IsCrouching then
-		speed -= (ActiveModifiers.PlayerCrouchSlow and CROUCH_SLOW_PEN or CROUCH_PENALTY)
-	end
-
-	return speed
-end
-
-local function ApplyWalkSpeed(userBoost)
-	if not Character or not Humanoid then return end
-
-	local safeBoost = math.min(userBoost or 0, MAX_SAFE_BOOST)
-	local baseSpeed = ComputeBaseSpeed()
-	Humanoid.WalkSpeed = baseSpeed + safeBoost
-end
-
-if LiveModifiers then
-	Functions.ConnectSignal(LiveModifiers.ChildAdded, RebuildModifierCache)
-	Functions.ConnectSignal(LiveModifiers.ChildRemoved, RebuildModifierCache)
-	RebuildModifierCache()
-end
-
-local function HookCharacterAttributes()
-	if not Character then return end
-
-	local attrs = {"SpeedBoost", "SpeedBoostBehind", "SpeedBoostExtra", "Crouching"}
-	for _, attrName in ipairs(attrs) do
-		Functions.ConnectSignal(Character:GetAttributeChangedSignal(attrName), function()
-			RefreshAttributeCache()
-			RefreshCrouchState()
-			ApplyWalkSpeed(Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value or 0)
-		end)
-	end
-
-	RefreshAttributeCache()
-	RefreshCrouchState()
-end
-
-Functions.ConnectSignal(Players.LocalPlayer.CharacterAdded, function(newChar)
-	Character = newChar
-	Humanoid = Character:WaitForChild("Humanoid")
-	RootPart = Character:WaitForChild("HumanoidRootPart")
-	task.wait(0.1)
-	HookCharacterAttributes()
+    if tick() - MovementState.SpoofState.LastCrouchFire > MovementState.CrouchDelay then
+        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+            pcall(function()
+                RemotesFolder.Crouch:FireServer(true, true)
+            end)
+        end
+        MovementState.SpoofState.LastCrouchFire = tick()
+    end
 end)
 
-if Character then
-	HookCharacterAttributes()
-end
-
+-- === SpeedBoost toggle ===
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
-	ApplyWalkSpeed(Value and Options.SpeedBoost.Value or 0)
-	Functions.Notify({
-		Title = "Speed Boost",
-		Body = Value and "Enabled" or "Disabled"
-	})
+    if not Value and MovementState.SpeedBody.Parent then
+        MovementState.SpeedBody.Parent = nil
+    end
+    Functions.Notify({
+        Title = "Speed Boost",
+        Body = Value and "Enabled" or "Disabled"
+    })
 end)
 
-Options.SpeedBoost:OnChanged(function(Value)
-	if Toggles.SpeedBoostToggle.Value then
-		if Value > MAX_SAFE_BOOST and not Toggles.PositionSpoof.Value then
-			Toggles.PositionSpoof:SetValue(true)
-		end
-		ApplyWalkSpeed(Value)
-	end
+-- === Авто-включение PositionSpoof при SpeedBoost > 25 ===
+Options.SpeedBoost:OnChanged(function()
+    if Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value > 25 then
+        if not Toggles.PositionSpoof.Value then
+            Toggles.PositionSpoof:SetValue(true)
+        end
+    end
 end)
-
--- ============================================
--- POSITION SPOOF
--- ============================================
-
-local SpoofState = {
-	Applied = false,
-	LastCrouchFire = 0,
-}
 
 Toggles.PositionSpoof:OnChanged(function(Value)
-	if not RootPart or not Humanoid then return end
-	if Floor == "Fools" or Floor == "OldHotel" then return end
-
-	if Value and not SpoofState.Applied then
-		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-		Humanoid.HipHeight = 0.05
-		SpoofState.Applied = true
-	elseif not Value and SpoofState.Applied then
-		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-		Humanoid.HipHeight = 2.396
-		SpoofState.Applied = false
-	end
-end)
-
-Functions.ConnectSignal(RunService.RenderStepped, function()
-	if not Toggles.PositionSpoof.Value then return end
-	if not RootPart or not Humanoid or not Character then return end
-	if Floor == "Fools" or Floor == "OldHotel" then return end
-
-	local Collision = Character:FindFirstChild("Collision")
-	local CollisionPart = Character:FindFirstChild("CollisionPart")
-
-	if Collision then
-		Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-	end
-	if CollisionPart then
-		CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-	end
-
-	if tick() - SpoofState.LastCrouchFire > 0.1 then
-		if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-			pcall(function()
-				RemotesFolder.Crouch:FireServer(true, true)
-			end)
-		end
-		SpoofState.LastCrouchFire = tick()
-	end
+    ApplyPositionSpoof(Value)
 end)
 
 -- ============================================
@@ -452,6 +443,39 @@ local ESP = {
     LastPlayerScan = 0,
     ScanInterval = 0.5,
 }
+
+local function IsEntitySelected(alias)
+    local EntityOptions = Options.EntityESPOptions
+    if not EntityOptions or not EntityOptions.Value then
+        return true
+    end
+
+    local selected = EntityOptions.Value
+    if type(selected) == "string" then
+        return selected == alias
+    end
+
+    if type(selected) == "table" then
+        for _, value in ipairs(selected) do
+            if value == alias then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function AddESPForObject(Object, Text, Color)
+    if not Object then return end
+    pcall(function()
+        ESPLibrary:AddESP({
+            Object = Object,
+            Text = Text,
+            Color = Color,
+        })
+    end)
+end
 
 local Objects = {
     Entities = {},
@@ -697,11 +721,8 @@ local function ScanAndUpdate()
 
             -- Доп. фильтр для сущностей: проверка по списку
             if isOn and category == "Entities" then
-                local EntityOptions = Options.EntityESPOptions
-                if EntityOptions and EntityOptions.Value then
-                    if not EntityOptions.Value[label] then
-                        isOn = false
-                    end
+                if not IsEntitySelected(label) then
+                    isOn = false
                 end
             end
             if isOn and not ESP.Added[target] then
@@ -773,20 +794,9 @@ local function HandleEntitySpawn(Entity)
     -- Уведомление (только если включён NotifyEntities — но у нас его нет, пропускаем)
 
     if Model.Name ~= "GloombatSwarm" then
-        if Toggles.EntityESPToggle.Value and Options.EntityESPOptions.Value[RealAlias] then
-            if Model.Name == "MonumentEntity" then
-                Functions.AddESP({
-                    Object = Model.Top,
-                    Text = Alias,
-                    Color = Options.EntityESPColor.Value
-                })
-            else
-                Functions.AddESP({
-                    Object = Model,
-                    Text = Alias,
-                    Color = Options.EntityESPColor.Value
-                })
-            end
+        if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
+            local ESPTarget = (Model.Name == "MonumentEntity" and Model:FindFirstChild("Top")) or Model
+            AddESPForObject(ESPTarget, Alias, Options.EntityESPColor.Value)
         end
         table.insert(Objects.Entities, Model)
     end

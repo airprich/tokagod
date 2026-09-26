@@ -187,225 +187,196 @@ Groupboxes.General_Character:AddDropdown("VelocityManipulationMode", {
     Default = 1,
 })
 
--- ============================================
--- SPEED LOGIC + POSITION SPOOF + ANTICHEAT BYPASS
--- Технология Abysall, улучшенная версия
--- ============================================
+-- ============================================================
+-- SPEED SYSTEM v2 (переписано по Abysall)
+-- ============================================================
 
-Functions.IsCrouching = function()
-    if not Character then return false end
-    if Floor == "Fools" or Floor == "OldHotel" then
-        return Character:GetAttribute("Crouching") == true
-    end
-    local CP = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
-    return CP and CP.CollisionGroup == "PlayerCrouching" or false
-end
+local BASE_WALKSPEED   = 15
+local CROUCH_PENALTY   = 5
+local CROUCH_SLOW_PEN  = 8
+local PARTY_BONUS      = 10
+local INJURY_MULT      = 0.075
+local MAX_SAFE_BOOST   = 15
 
-Functions.GetInjuriesSpeed = function()
-    if not Humanoid then return 0 end
-    return 0.075 * (Humanoid.MaxHealth - Humanoid.Health)
-end
-
-Functions.GetCurrentSpeed = function()
-    local Speed = 15
-    if not Character or not Humanoid then return Speed end
-
-    Speed += Character:GetAttribute("SpeedBoost") or 0
-    Speed += Character:GetAttribute("SpeedBoostBehind") or 0
-    Speed += Character:GetAttribute("SpeedBoostExtra") or 0
-    Speed += (Floor == "Party" and 10 or 0)
-
-    if LiveModifiers then
-        Speed += (LiveModifiers:FindFirstChild("PlayerFast") and 3 or 0)
-        Speed += (LiveModifiers:FindFirstChild("PlayerFaster") and 6 or 0)
-        Speed += (LiveModifiers:FindFirstChild("PlayerFastest") and 20 or 0)
-        Speed -= (LiveModifiers:FindFirstChild("PlayerSlow") and 3 or 0)
-        Speed -= (LiveModifiers:FindFirstChild("PlayerSlowHealth") and Functions.GetInjuriesSpeed() or 0)
-    end
-
-    if Functions.IsCrouching() then
-        Speed -= (LiveModifiers and LiveModifiers:FindFirstChild("PlayerCrouchSlow") and 8 or 5)
-    end
-
-    return Speed
-end
-
--- === SpeedBody (BodyVelocity вместо WalkSpeed) ===
-local SpeedBody = Instance.new("BodyVelocity")
-SpeedBody.Name = "tokagod_SpeedBody"
-SpeedBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-SpeedBody.P = 1250
-SpeedBody.Parent = nil
-table.insert(Globals.BodyObjects, SpeedBody)
-
--- === SpoofState ===
-local SpoofState = {
-    Applied = false,
-    LastCrouchFire = 0,
+local SPEED_MODIFIER_TABLE = {
+	PlayerFast    =  3,
+	PlayerFaster  =  6,
+	PlayerFastest = 20,
+	PlayerSlow    = -3,
 }
 
--- Максимальная безопасная скорость (выше — античит палит)
-local MAX_BOOST = 25
-local CROUCH_DELAY = 0.1
+local ActiveModifiers = {
+	PlayerFast = false, PlayerFaster = false, PlayerFastest = false,
+	PlayerSlow = false, PlayerCrouchSlow = false, PlayerSlowHealth = false,
+}
 
--- === Hook на Crouch FireServer (главный обход) ===
-if tokagod.Environment
-   and tokagod.Environment.hookmetamethod
-   and tokagod.Environment.newcclosure
-   and tokagod.Environment.getnamecallmethod
-then
-    local OldNamecall
-    OldNamecall = tokagod.Environment.hookmetamethod(
-        game, "__namecall",
-        tokagod.Environment.newcclosure(function(Self, ...)
-            local Args = { ... }
-            local Method = tokagod.Environment.getnamecallmethod()
+local CharacterCache = {
+	AttrSpeedBoost       = 0,
+	AttrSpeedBoostBehind = 0,
+	AttrSpeedBoostExtra  = 0,
+	IsCrouching          = false,
+}
 
-            -- Всегда "крадусь, не двигаюсь"
-            if Self.Name == "Crouch" and Method == "FireServer" then
-                Args[1] = true
-                Args[2] = true
-            end
-
-            return OldNamecall(Self, table.unpack(Args))
-        end)
-    )
+local function RebuildModifierCache()
+	for name in pairs(ActiveModifiers) do
+		ActiveModifiers[name] = LiveModifiers and LiveModifiers:FindFirstChild(name) ~= nil
+	end
 end
 
--- === Main Loop: Speed + Spoof ===
-Functions.ConnectSignal(RunService.RenderStepped, function()
-    if not Character or not Humanoid or not RootPart then return end
+local function RefreshCrouchState()
+	if not Character then return end
+	if Floor == "Fools" or Floor == "OldHotel" then
+		CharacterCache.IsCrouching = Character:GetAttribute("Crouching") == true
+	else
+		local CP = Character:FindFirstChild("CollisionPart") or Character:FindFirstChild("Collision")
+		if CP then
+			CharacterCache.IsCrouching = CP.CollisionGroup == "PlayerCrouching"
+		end
+	end
+end
 
-    -- WalkSpeed НЕ трогаем! Игра сама управляет им, включая Seek-ускорение.
+local function RefreshAttributeCache()
+	if not Character then return end
+	CharacterCache.AttrSpeedBoost       = Character:GetAttribute("SpeedBoost")       or 0
+	CharacterCache.AttrSpeedBoostBehind = Character:GetAttribute("SpeedBoostBehind") or 0
+	CharacterCache.AttrSpeedBoostExtra  = Character:GetAttribute("SpeedBoostExtra")  or 0
+end
 
-    -- === SPEED BOOST через BodyVelocity ===
-    if Toggles.SpeedBoostToggle.Value then
-        local MoveDir = Humanoid.MoveDirection
-        if MoveDir.Magnitude > 0.05 then
-            local Extra = math.min(Options.SpeedBoost.Value or 0, MAX_BOOST)
-            if Extra > 0 then
-                SpeedBody.Parent = RootPart
-                SpeedBody.Velocity = MoveDir.Unit * Extra
-            else
-                SpeedBody.Parent = nil
-            end
-        else
-            SpeedBody.Parent = nil
-        end
-    else
-        SpeedBody.Parent = nil
-    end
+local function ComputeBaseSpeed()
+	if not Character or not Humanoid then return BASE_WALKSPEED end
 
-    -- === POSITION SPOOF ===
-    if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
-        -- RootPart визуально под пол (один раз)
-        if not SpoofState.Applied then
-            RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-            Humanoid.HipHeight = 0.05
-            SpoofState.Applied = true
-        end
+	local speed = BASE_WALKSPEED
+		+ CharacterCache.AttrSpeedBoost
+		+ CharacterCache.AttrSpeedBoostBehind
+		+ CharacterCache.AttrSpeedBoostExtra
 
-        -- Collision всегда над RootPart
-        local Collision = Character:FindFirstChild("Collision")
-        local CollisionPart = Character:FindFirstChild("CollisionPart")
+	if Floor == "Party" then
+		speed += PARTY_BONUS
+	end
 
-        if Collision then
-            Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-        end
-        if CollisionPart then
-            CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-        end
-    elseif SpoofState.Applied and not Toggles.PositionSpoof.Value then
-        -- Отключаем спуф
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-        Humanoid.HipHeight = 2.396
-        SpoofState.Applied = false
-    end
+	for name, bonus in pairs(SPEED_MODIFIER_TABLE) do
+		if ActiveModifiers[name] then
+			speed += bonus
+		end
+	end
 
-    -- === Crouch spam ===
-    if tick() - SpoofState.LastCrouchFire > CROUCH_DELAY then
-        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-            pcall(function()
-                RemotesFolder.Crouch:FireServer(true, true)
-            end)
-        end
-        SpoofState.LastCrouchFire = tick()
-    end
+	if ActiveModifiers.PlayerSlowHealth then
+		speed -= INJURY_MULT * (Humanoid.MaxHealth - Humanoid.Health)
+	end
+
+	if CharacterCache.IsCrouching then
+		speed -= (ActiveModifiers.PlayerCrouchSlow and CROUCH_SLOW_PEN or CROUCH_PENALTY)
+	end
+
+	return speed
+end
+
+local function ApplyWalkSpeed(userBoost)
+	if not Character or not Humanoid then return end
+
+	local safeBoost = math.min(userBoost or 0, MAX_SAFE_BOOST)
+	local baseSpeed = ComputeBaseSpeed()
+	Humanoid.WalkSpeed = baseSpeed + safeBoost
+end
+
+if LiveModifiers then
+	Functions.ConnectSignal(LiveModifiers.ChildAdded, RebuildModifierCache)
+	Functions.ConnectSignal(LiveModifiers.ChildRemoved, RebuildModifierCache)
+	RebuildModifierCache()
+end
+
+local function HookCharacterAttributes()
+	if not Character then return end
+
+	local attrs = {"SpeedBoost", "SpeedBoostBehind", "SpeedBoostExtra", "Crouching"}
+	for _, attrName in ipairs(attrs) do
+		Functions.ConnectSignal(Character:GetAttributeChangedSignal(attrName), function()
+			RefreshAttributeCache()
+			RefreshCrouchState()
+			ApplyWalkSpeed(Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value or 0)
+		end)
+	end
+
+	RefreshAttributeCache()
+	RefreshCrouchState()
+end
+
+Functions.ConnectSignal(Players.LocalPlayer.CharacterAdded, function(newChar)
+	Character = newChar
+	Humanoid = Character:WaitForChild("Humanoid")
+	RootPart = Character:WaitForChild("HumanoidRootPart")
+	task.wait(0.1)
+	HookCharacterAttributes()
 end)
 
--- === SpeedBoost toggle ===
+if Character then
+	HookCharacterAttributes()
+end
+
 Toggles.SpeedBoostToggle:OnChanged(function(Value)
-    if not Value and SpeedBody.Parent then
-        SpeedBody.Parent = nil
-    end
-    Functions.Notify({
-        Title = "Speed Boost",
-        Body = Value and "Enabled" or "Disabled"
-    })
+	ApplyWalkSpeed(Value and Options.SpeedBoost.Value or 0)
+	Functions.Notify({
+		Title = "Speed Boost",
+		Body = Value and "Enabled" or "Disabled"
+	})
 end)
 
--- === Авто-включение PositionSpoof при SpeedBoost > 25 ===
-Options.SpeedBoost:OnChanged(function()
-    if Toggles.SpeedBoostToggle.Value and Options.SpeedBoost.Value > 25 then
-        if not Toggles.PositionSpoof.Value then
-            Toggles.PositionSpoof:SetValue(true)
-        end
-    end
+Options.SpeedBoost:OnChanged(function(Value)
+	if Toggles.SpeedBoostToggle.Value then
+		if Value > MAX_SAFE_BOOST and not Toggles.PositionSpoof.Value then
+			Toggles.PositionSpoof:SetValue(true)
+		end
+		ApplyWalkSpeed(Value)
+	end
 end)
 
 -- ============================================
--- POSITION SPOOF (правильный — Collision над RootPart)
+-- POSITION SPOOF
 -- ============================================
 
 local SpoofState = {
-    Applied = false,
-    LastCrouch = 0,
+	Applied = false,
+	LastCrouchFire = 0,
 }
 
 Toggles.PositionSpoof:OnChanged(function(Value)
-    if not RootPart or not Humanoid then return end
-    if Floor == "Fools" or Floor == "OldHotel" then return end
+	if not RootPart or not Humanoid then return end
+	if Floor == "Fools" or Floor == "OldHotel" then return end
 
-    if Value and not SpoofState.Applied then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-        Humanoid.HipHeight = 0.05
-        SpoofState.Applied = true
-    elseif not Value and SpoofState.Applied then
-        RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-        Humanoid.HipHeight = 2.396
-        SpoofState.Applied = false
-    end
+	if Value and not SpoofState.Applied then
+		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+		Humanoid.HipHeight = 0.05
+		SpoofState.Applied = true
+	elseif not Value and SpoofState.Applied then
+		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+		Humanoid.HipHeight = 2.396
+		SpoofState.Applied = false
+	end
 end)
 
 Functions.ConnectSignal(RunService.RenderStepped, function()
-    if not Toggles.PositionSpoof.Value then return end
-    if not RootPart or not Humanoid or not Character then return end
-    if Floor == "Fools" or Floor == "OldHotel" then return end
+	if not Toggles.PositionSpoof.Value then return end
+	if not RootPart or not Humanoid or not Character then return end
+	if Floor == "Fools" or Floor == "OldHotel" then return end
 
-    -- RootPart визуально под пол
-    RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-    Humanoid.HipHeight = 0.05
+	local Collision = Character:FindFirstChild("Collision")
+	local CollisionPart = Character:FindFirstChild("CollisionPart")
 
-    -- Collision/ CollisionPart ВСЕГДА на 2.328 выше RootPart
-    local Collision = Character:FindFirstChild("Collision")
-    local CollisionPart = Character:FindFirstChild("CollisionPart")
+	if Collision then
+		Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+	end
+	if CollisionPart then
+		CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
+	end
 
-    if Collision then
-        Collision.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-    end
-    if CollisionPart then
-        CollisionPart.Position = RootPart.Position + Vector3.new(0, 2.328, 0)
-    end
-
-    -- Спамим Crouch каждые 0.1 сек
-    if tick() - SpoofState.LastCrouch > 0.1 then
-        if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
-            pcall(function()
-                RemotesFolder.Crouch:FireServer(true, true)
-            end)
-        end
-        SpoofState.LastCrouch = tick()
-    end
+	if tick() - SpoofState.LastCrouchFire > 0.1 then
+		if RemotesFolder and RemotesFolder:FindFirstChild("Crouch") then
+			pcall(function()
+				RemotesFolder.Crouch:FireServer(true, true)
+			end)
+		end
+		SpoofState.LastCrouchFire = tick()
+	end
 end)
 
 -- ============================================

@@ -100,7 +100,7 @@ end
 -- ============================================
 
 local Window = Library:CreateWindow({
-    Title = "?,,,,,,",
+    Title = "?",
     Footer = "dsc.gg/?????",
     NotifySide = "Right",
     ShowCustomCursor = false,
@@ -164,6 +164,36 @@ Groupboxes.General_Character:AddSlider("FlySpeed", {
     Text = "Fly Speed",
     Min = 0, Max = 115, Default = 20,
     Rounding = 0, Compact = true
+})
+
+Groupboxes.General_Character:AddSlider("FlyAcceleration", {
+    Text = "Fly Acceleration",
+    Min = 5, Max = 150, Default = 45,
+    Rounding = 0, Compact = true
+})
+
+Groupboxes.General_Character:AddSlider("FlyDeceleration", {
+    Text = "Fly Deceleration",
+    Min = 5, Max = 150, Default = 35,
+    Rounding = 0, Compact = true
+})
+
+Groupboxes.General_Character:AddSlider("FlyShiftMultiplier", {
+    Text = "Fly Shift Multiplier",
+    Min = 1, Max = 4, Default = 2,
+    Rounding = 1, Compact = true
+})
+
+Groupboxes.General_Character:AddSlider("FlyVerticalSpeed", {
+    Text = "Fly Vertical Speed",
+    Min = 1, Max = 80, Default = 20,
+    Rounding = 0, Compact = true
+})
+
+Groupboxes.General_Character:AddSlider("FlySmoothness", {
+    Text = "Fly Turn Smoothness",
+    Min = 1, Max = 20, Default = 8,
+    Rounding = 1, Compact = true
 })
 
 Groupboxes.General_Character:AddDivider()
@@ -394,63 +424,263 @@ end)
 -- FLY
 -- ============================================
 
+local StopFly
+
+local function MoveTowardsVector(current, target, maxDelta)
+    local difference = target - current
+    local distance = difference.Magnitude
+    if distance <= maxDelta or distance == 0 then
+        return target
+    end
+    return current + difference / distance * maxDelta
+end
+
+local function RemoveFlyObject(object)
+    if not object then return end
+    for index = #Globals.BodyObjects, 1, -1 do
+        if Globals.BodyObjects[index] == object then
+            table.remove(Globals.BodyObjects, index)
+        end
+    end
+    if object.Parent then
+        object:Destroy()
+    end
+end
+
+local function RestoreFlyCharacter(root, humanoid)
+    if root and root.Parent then
+        for _, object in ipairs(root:GetChildren()) do
+            if object.Name == "tokagod_FlyVelocity" or object.Name == "tokagod_FlyGyro" then
+                object:Destroy()
+            end
+        end
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    if humanoid and humanoid.Parent then
+        humanoid.PlatformStand = false
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Freefall
+            or state == Enum.HumanoidStateType.PlatformStanding then
+            pcall(function()
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end)
+        end
+    end
+end
+
+local function FinishFlyLanding()
+    local root = Globals.Active.FlyRootPart
+    local humanoid = Globals.Active.FlyHumanoid
+    local bodyVelocity = Globals.Active.FlyVelocity
+
+    if Globals.Active.FlyConnection then
+        Globals.Active.FlyConnection:Disconnect()
+        Globals.Active.FlyConnection = nil
+    end
+
+    RemoveFlyObject(bodyVelocity)
+    RemoveFlyObject(Globals.Active.FlyGyro)
+    RestoreFlyCharacter(root, humanoid)
+    Globals.Active.FlyVelocity = nil
+    Globals.Active.FlyGyro = nil
+    Globals.Active.FlyRootPart = nil
+    Globals.Active.FlyHumanoid = nil
+    Globals.Active.FlyCurrentVelocity = nil
+    Globals.Active.FlyRaycastParams = nil
+    Globals.Active.FlyLanding = false
+end
+
+local function UpdateFly(deltaTime)
+    if not Globals.Active.Fly then return end
+    local dt = math.min(deltaTime, 0.1)
+
+    local root = Globals.Active.FlyRootPart
+    local humanoid = Globals.Active.FlyHumanoid
+    local bodyVelocity = Globals.Active.FlyVelocity
+    local bodyGyro = Globals.Active.FlyGyro
+    local camera = Workspace.CurrentCamera
+    if not root or not root.Parent or not humanoid or humanoid.Health <= 0
+        or not bodyVelocity or not bodyGyro or not camera then
+        StopFly(true)
+        return
+    end
+
+    local cameraFrame = camera.CFrame
+    local forward = Vector3.new(cameraFrame.LookVector.X, 0, cameraFrame.LookVector.Z)
+    local right = Vector3.new(cameraFrame.RightVector.X, 0, cameraFrame.RightVector.Z)
+    if forward.Magnitude > 0 then forward = forward.Unit end
+    if right.Magnitude > 0 then right = right.Unit end
+
+    local horizontalInput = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then horizontalInput += forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then horizontalInput -= forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then horizontalInput += right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then horizontalInput -= right end
+    if horizontalInput.Magnitude > 1 then horizontalInput = horizontalInput.Unit end
+
+    local multiplier = 1
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+        or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
+        multiplier *= Options.FlyShiftMultiplier.Value or 1
+    end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt)
+        or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt) then
+        multiplier *= 0.5
+    end
+
+    local flySpeed = Options.FlySpeed.Value * multiplier
+    local verticalInput = 0
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then verticalInput += 1 end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then verticalInput -= 1 end
+
+    local targetVelocity = Vector3.new(
+        horizontalInput.X * flySpeed,
+        verticalInput * (Options.FlyVerticalSpeed.Value or 20) * multiplier,
+        horizontalInput.Z * flySpeed
+    )
+
+    local hasInput = horizontalInput.Magnitude > 0 or verticalInput ~= 0
+    local acceleration = hasInput and Options.FlyAcceleration.Value or Options.FlyDeceleration.Value
+    local currentVelocity = Globals.Active.FlyCurrentVelocity or root.AssemblyLinearVelocity
+    currentVelocity = MoveTowardsVector(currentVelocity, targetVelocity, acceleration * dt)
+
+    local travel = currentVelocity * dt
+    if travel.Magnitude > 0.01 then
+        local rayParams = Globals.Active.FlyRaycastParams
+        local hit = Workspace:Raycast(root.Position, travel.Unit * (travel.Magnitude + 2), rayParams)
+        if hit then
+            local intoWall = currentVelocity:Dot(hit.Normal)
+            if intoWall < 0 then
+                currentVelocity -= hit.Normal * intoWall
+            end
+        end
+    end
+
+    Globals.Active.FlyCurrentVelocity = currentVelocity
+    bodyVelocity.Velocity = currentVelocity
+
+    local facing = Vector3.new(cameraFrame.LookVector.X, 0, cameraFrame.LookVector.Z)
+    if facing.Magnitude > 0.001 then
+        local targetRotation = CFrame.lookAt(root.Position, root.Position + facing.Unit)
+        local turnAlpha = 1 - math.exp(-(Options.FlySmoothness.Value or 8) * dt)
+        bodyGyro.CFrame = bodyGyro.CFrame:Lerp(targetRotation, turnAlpha)
+    end
+end
+
 local function StartFly()
-    if not Character or not RootPart or not Humanoid then return end
+    if Globals.Active.FlyLanding then
+        StopFly(true)
+    end
+    if not Character or not RootPart or not Humanoid or Humanoid.Health <= 0 then return end
     if Globals.Active.Fly then return end
+    if Globals.Active.FlyConnection then
+        StopFly(true)
+    end
 
     local bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bodyVelocity.P = 1250
+    bodyVelocity.Name = "tokagod_FlyVelocity"
+    bodyVelocity.MaxForce = Vector3.one * RootPart.AssemblyMass * 10000
+    bodyVelocity.P = 2500
+    bodyVelocity.Velocity = RootPart.AssemblyLinearVelocity
     bodyVelocity.Parent = RootPart
 
     local bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    bodyGyro.P = 1250
+    bodyGyro.Name = "tokagod_FlyGyro"
+    bodyGyro.MaxTorque = Vector3.one * RootPart.AssemblyMass * 10000
+    bodyGyro.P = 2500
+    bodyGyro.D = 500
     bodyGyro.CFrame = RootPart.CFrame
     bodyGyro.Parent = RootPart
 
     table.insert(Globals.BodyObjects, bodyVelocity)
     table.insert(Globals.BodyObjects, bodyGyro)
+    Globals.Active.FlyVelocity = bodyVelocity
+    Globals.Active.FlyGyro = bodyGyro
+    Globals.Active.FlyRootPart = RootPart
+    Globals.Active.FlyHumanoid = Humanoid
+    Globals.Active.FlyCurrentVelocity = RootPart.AssemblyLinearVelocity
+    Globals.Active.FlyRaycastParams = RaycastParams.new()
+    Globals.Active.FlyRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    Globals.Active.FlyRaycastParams.FilterDescendantsInstances = { Character }
+    Globals.Active.Fly = true
+    Globals.Active.FlyLanding = false
 
     Humanoid.PlatformStand = true
-    Globals.Active.Fly = true
-
-    local Camera = Workspace.CurrentCamera
-    local conn = Functions.ConnectSignal(RunService.RenderStepped, function()
-        if not RootPart or not Humanoid or not Globals.Active.Fly then return end
-
-        local direction = Vector3.zero
-        local cam = Camera.CFrame
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + cam.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - cam.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - cam.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + cam.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction = direction + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then direction = direction - Vector3.new(0, 1, 0) end
-
-        if direction.Magnitude > 0 then direction = direction.Unit end
-
-        bodyVelocity.Velocity = direction * Options.FlySpeed.Value
-        bodyGyro.CFrame = cam
+    Globals.Active.FlyConnection = Functions.ConnectSignal(RunService.RenderStepped, UpdateFly)
+    Globals.Active.FlyDiedConnection = Functions.ConnectCharacterSignal(Humanoid.Died, function()
+        StopFly(true)
+        pcall(function() Toggles.FlyToggle:SetValue(false) end)
     end)
-
-    Globals.Active.FlyConnection = conn
 end
 
-local function StopFly()
+StopFly = function(immediate)
+    local root = Globals.Active.FlyRootPart
+    local humanoid = Globals.Active.FlyHumanoid
+    local bodyVelocity = Globals.Active.FlyVelocity
+    local bodyGyro = Globals.Active.FlyGyro
+
+    if Globals.Active.FlyDiedConnection then
+        Globals.Active.FlyDiedConnection:Disconnect()
+        Globals.Active.FlyDiedConnection = nil
+    end
+
+    if not Globals.Active.Fly and not Globals.Active.FlyConnection then return end
+    Globals.Active.Fly = false
     if Globals.Active.FlyConnection then
         Globals.Active.FlyConnection:Disconnect()
         Globals.Active.FlyConnection = nil
     end
-    if Humanoid then
-        Humanoid.PlatformStand = false
+
+    RemoveFlyObject(bodyGyro)
+    Globals.Active.FlyGyro = nil
+
+    if not immediate and root and root.Parent and humanoid and humanoid.Health > 0 and bodyVelocity then
+        Globals.Active.FlyLanding = true
+        Globals.Active.FlyCurrentVelocity = root.AssemblyLinearVelocity
+        bodyVelocity.Velocity = Globals.Active.FlyCurrentVelocity
+        humanoid.PlatformStand = true
+
+        Globals.Active.FlyConnection = Functions.ConnectSignal(RunService.Heartbeat, function(deltaTime)
+            if not root.Parent or humanoid.Health <= 0 then
+                FinishFlyLanding()
+                return
+            end
+
+            Globals.Active.FlyCurrentVelocity = MoveTowardsVector(
+                Globals.Active.FlyCurrentVelocity,
+                Vector3.new(0, -3, 0),
+                Options.FlyDeceleration.Value * deltaTime
+            )
+            bodyVelocity.Velocity = Globals.Active.FlyCurrentVelocity
+
+            local groundDistance = root.Size.Y * 0.5 + 2.5
+            local ground = Workspace:Raycast(
+                root.Position,
+                Vector3.new(0, -groundDistance, 0),
+                Globals.Active.FlyRaycastParams
+            )
+            if ground then
+                FinishFlyLanding()
+            end
+        end)
+        return
     end
-    Globals.Active.Fly = false
+
+    if bodyVelocity then bodyVelocity.Velocity = Vector3.zero end
+    RemoveFlyObject(bodyVelocity)
+    RestoreFlyCharacter(root, humanoid)
+    Globals.Active.FlyVelocity = nil
+    Globals.Active.FlyRootPart = nil
+    Globals.Active.FlyHumanoid = nil
+    Globals.Active.FlyCurrentVelocity = nil
+    Globals.Active.FlyRaycastParams = nil
+    Globals.Active.FlyLanding = false
 end
 
 Toggles.FlyToggle:OnChanged(function(Value)
-    if Value then StartFly() else StopFly() end
+    if Value then StartFly() else StopFly(true) end
 end)
 
 -- ============================================
@@ -482,6 +712,9 @@ local function IsEntitySelected(alias)
     end
 
     if type(selected) == "table" then
+        if selected[alias] == true then
+            return true
+        end
         for _, value in ipairs(selected) do
             if value == alias then
                 return true
@@ -493,14 +726,44 @@ local function IsEntitySelected(alias)
 end
 
 local function AddESPForObject(Object, Text, Color)
-    if not Object then return end
-    pcall(function()
+    if not Object then return nil end
+    local ok = pcall(function()
         ESPLibrary:AddESP({
             Object = Object,
             Text = Text,
             Color = Color,
         })
     end)
+    if ok then return Object end
+
+    if Object:IsA("Model") then
+        local primaryPart = Object.PrimaryPart or Object:FindFirstChildWhichIsA("BasePart", true)
+        if primaryPart then
+            local fallbackOk = pcall(function()
+                ESPLibrary:AddESP({
+                    Object = primaryPart,
+                    Text = Text,
+                    Color = Color,
+                })
+            end)
+            if fallbackOk then return primaryPart end
+        end
+    end
+
+    return nil
+end
+
+local function GetEntityESPTarget(Model)
+    if Model.Name == "MonumentEntity" then
+        local top = Model:FindFirstChild("Top")
+        if top and top:IsA("BasePart") then
+            return top
+        elseif top and top:IsA("Model") then
+            return top.PrimaryPart or top:FindFirstChildWhichIsA("BasePart", true)
+        end
+    end
+
+    return Model.PrimaryPart or Model:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local Objects = {
@@ -579,6 +842,26 @@ local Entities = {
     ["DoorFake"]={Alias="Dupe"},
     ["FakeDoor"]={Alias="Dupe"}
 }
+
+local function RefreshEntityESP()
+    for Object, category in pairs(ESP.Added) do
+        if category == "Entities" then
+            pcall(function()
+                ESPLibrary:RemoveESP(Object)
+            end)
+            ESP.Added[Object] = nil
+        end
+    end
+
+    if not Toggles.EntityESPToggle or not Toggles.EntityESPToggle.Value then return end
+
+    for _, Model in ipairs(Objects.Entities) do
+        local entityData = Entities[Model.Name]
+        if Model.Parent and entityData and IsEntitySelected(entityData.Alias) then
+            EnqueueESPObject(Model)
+        end
+    end
+end
 
 local HidingSpotLabels = {
     Wardrobe="Closet",["Backdoor_Wardrobe"]="Closet",Toolshed="Closet",
@@ -707,7 +990,7 @@ local function ClassifyObject(Object)
     end
 
     if Entities[Name] then
-        return "Entities", Entities[Name].Alias, Object
+        return "Entities", Entities[Name].Alias, GetEntityESPTarget(Object)
     end
 
     return nil, nil, nil
@@ -805,16 +1088,20 @@ local function HandleEntitySpawn(Entity)
     if Entity:IsA("Humanoid") then
         Model = Entity.Parent
     end
-    if not Model or not Model:IsA("Model") then return end
+    while Model and (not Model:IsA("Model") or not Entities[Model.Name]) do
+        Model = Model.Parent
+    end
+    if not Model then return end
 
     local EntityData = Entities[Model.Name]
     if not EntityData then return end
     if Model:GetAttribute("tokagod_EntityHandled") then return end
     Model:SetAttribute("tokagod_EntityHandled", true)
+    print("Entity spawn:", Model.Name)
 
     local start = tick()
     while not Model.PrimaryPart do
-        for _, Child in Model:GetChildren() do
+        for _, Child in Model:GetDescendants() do
             if Child:IsA("BasePart") then Model.PrimaryPart = Child end
         end
         if tick() - start > 5 then break end
@@ -822,31 +1109,43 @@ local function HandleEntitySpawn(Entity)
     end
     task.wait(0.1)
 
-    if not Model.PrimaryPart or LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
+    if not Model.PrimaryPart then
+        Model:SetAttribute("tokagod_EntityHandled", nil)
+        warn("Entity has no BasePart:", Model.Name)
+        return
+    end
+    if LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
 
     local Alias = EntityData.Alias
     local RealAlias = Alias
 
     -- Уведомление (только если включён NotifyEntities — но у нас его нет, пропускаем)
 
-    if Model.Name ~= "GloombatSwarm" then
-        if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
-            local ESPTarget = (Model.Name == "MonumentEntity" and Model:FindFirstChild("Top")) or Model
-            AddESPForObject(ESPTarget, Alias, Options.EntityESPColor.Value)
+    table.insert(Objects.Entities, Model)
+    Model.Destroying:Once(function()
+        local index = table.find(Objects.Entities, Model)
+        if index then
+            table.remove(Objects.Entities, index)
         end
-        table.insert(Objects.Entities, Model)
-    end
 
-    if Model.Name == "GloombatSwarm" then
-        if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
-            local ESPTarget = Model
-            AddESPForObject(ESPTarget, Alias, Options.EntityESPColor.Value)
+        local target = GetEntityESPTarget(Model)
+        if target and ESP.Added[target] == "Entities" then
+            pcall(function()
+                ESPLibrary:RemoveESP(target)
+            end)
+            ESP.Added[target] = nil
         end
-        table.insert(Objects.Entities, Model)
+        ESP.Queue[Model] = nil
+    end)
+
+    if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
+        EnqueueESPObject(Model)
     end
 
     if RusherAliases[EntityData.Alias] then
-        Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
+        if not Model:FindFirstChild("HighlightHumanoid") then
+            Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
+        end
         local Root = Model.PrimaryPart
         if Root then
             Root.Transparency = 0.999
@@ -867,12 +1166,9 @@ end)
 
 Functions.ConnectSignal(Workspace.DescendantAdded, function(Descendant)
     EnqueueESPObject(Descendant)
-    local EntityModel = Descendant:IsA("Humanoid") and Descendant.Parent or Descendant
-    if EntityModel and EntityModel:IsA("Model") and Entities[EntityModel.Name] then
-        task.defer(function()
-            HandleEntitySpawn(Descendant)
-        end)
-    end
+    task.defer(function()
+        HandleEntitySpawn(Descendant)
+    end)
 end)
 
 -- === Player ESP (отдельно) ===
@@ -936,6 +1232,8 @@ Groupboxes.Visuals_ESP:AddDropdown("EntityESPOptions", {
     AllowNull = true,
 })
 Groupboxes.Visuals_ESP:AddToggle("EntityESPToggle",     { Text = "Entities", Default = false })
+Toggles.EntityESPToggle:OnChanged(RefreshEntityESP)
+Options.EntityESPOptions:OnChanged(RefreshEntityESP)
 
 Toggles.ObjectiveESPToggle:AddColorPicker("ObjectiveESPColor", { Text = "Objectives", Default = Color3.fromRGB(0,255,0), Transparency = 0 })
 Toggles.DoorESPToggle:AddColorPicker("DoorESPColor",           { Text = "Doors", Default = Color3.fromRGB(0,200,255), Transparency = 0 })
@@ -1110,6 +1408,9 @@ end
 -- ============================================
 
 local function OnCharacterAdded(newCharacter)
+    if Globals.Active.Fly or Globals.Active.FlyConnection then
+        StopFly(true)
+    end
     Functions.DisconnectCharacterConnections()
 
     Character = newCharacter
@@ -1174,7 +1475,7 @@ Settings_Misc:AddButton({
     DoubleClick = true,
     Risky = true,
     Func = function()
-        StopFly()
+        StopFly(true)
         StopNoclip()
         Functions.DisconnectAll()
         Functions.CleanupBodyObjects()
@@ -1191,7 +1492,7 @@ Settings_Misc:AddButton({
 })
 
 Library:OnUnload(function()
-    StopFly()
+    StopFly(true)
     StopNoclip()
     Functions.DisconnectAll()
     Functions.CleanupBodyObjects()

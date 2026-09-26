@@ -166,36 +166,6 @@ Groupboxes.General_Character:AddSlider("FlySpeed", {
     Rounding = 0, Compact = true
 })
 
-Groupboxes.General_Character:AddSlider("FlyAcceleration", {
-    Text = "Fly Acceleration",
-    Min = 5, Max = 150, Default = 45,
-    Rounding = 0, Compact = true
-})
-
-Groupboxes.General_Character:AddSlider("FlyDeceleration", {
-    Text = "Fly Deceleration",
-    Min = 5, Max = 150, Default = 35,
-    Rounding = 0, Compact = true
-})
-
-Groupboxes.General_Character:AddSlider("FlyShiftMultiplier", {
-    Text = "Fly Shift Multiplier",
-    Min = 1, Max = 4, Default = 2,
-    Rounding = 1, Compact = true
-})
-
-Groupboxes.General_Character:AddSlider("FlyVerticalSpeed", {
-    Text = "Fly Vertical Speed",
-    Min = 1, Max = 80, Default = 20,
-    Rounding = 0, Compact = true
-})
-
-Groupboxes.General_Character:AddSlider("FlySmoothness", {
-    Text = "Fly Turn Smoothness",
-    Min = 1, Max = 20, Default = 8,
-    Rounding = 1, Compact = true
-})
-
 Groupboxes.General_Character:AddDivider()
 
 Groupboxes.General_Character:AddToggle("NoclipToggle", {
@@ -426,15 +396,6 @@ end)
 
 local StopFly
 
-local function MoveTowardsVector(current, target, maxDelta)
-    local difference = target - current
-    local distance = difference.Magnitude
-    if distance <= maxDelta or distance == 0 then
-        return target
-    end
-    return current + difference / distance * maxDelta
-end
-
 local function RemoveFlyObject(object)
     if not object then return end
     for index = #Globals.BodyObjects, 1, -1 do
@@ -450,7 +411,7 @@ end
 local function RestoreFlyCharacter(root, humanoid)
     if root and root.Parent then
         for _, object in ipairs(root:GetChildren()) do
-            if object.Name == "tokagod_FlyVelocity" or object.Name == "tokagod_FlyGyro" then
+            if object.Name == "tokagod_FlyVelocity" then
                 object:Destroy()
             end
         end
@@ -470,109 +431,41 @@ local function RestoreFlyCharacter(root, humanoid)
     end
 end
 
-local function FinishFlyLanding()
-    local root = Globals.Active.FlyRootPart
-    local humanoid = Globals.Active.FlyHumanoid
-    local bodyVelocity = Globals.Active.FlyVelocity
-
-    if Globals.Active.FlyConnection then
-        Globals.Active.FlyConnection:Disconnect()
-        Globals.Active.FlyConnection = nil
-    end
-
-    RemoveFlyObject(bodyVelocity)
-    RemoveFlyObject(Globals.Active.FlyGyro)
-    RestoreFlyCharacter(root, humanoid)
-    Globals.Active.FlyVelocity = nil
-    Globals.Active.FlyGyro = nil
-    Globals.Active.FlyRootPart = nil
-    Globals.Active.FlyHumanoid = nil
-    Globals.Active.FlyCurrentVelocity = nil
-    Globals.Active.FlyRaycastParams = nil
-    Globals.Active.FlyLanding = false
-end
-
-local function UpdateFly(deltaTime)
+local function UpdateFly()
     if not Globals.Active.Fly then return end
-    local dt = math.min(deltaTime, 0.1)
 
     local root = Globals.Active.FlyRootPart
     local humanoid = Globals.Active.FlyHumanoid
     local bodyVelocity = Globals.Active.FlyVelocity
-    local bodyGyro = Globals.Active.FlyGyro
     local camera = Workspace.CurrentCamera
     if not root or not root.Parent or not humanoid or humanoid.Health <= 0
-        or not bodyVelocity or not bodyGyro or not camera then
+        or not bodyVelocity or not camera then
         StopFly(true)
         return
     end
 
-    local cameraFrame = camera.CFrame
-    local forward = Vector3.new(cameraFrame.LookVector.X, 0, cameraFrame.LookVector.Z)
-    local right = Vector3.new(cameraFrame.RightVector.X, 0, cameraFrame.RightVector.Z)
+    local cam = camera.CFrame
+    local forward = Vector3.new(cam.LookVector.X, 0, cam.LookVector.Z)
+    local right = Vector3.new(cam.RightVector.X, 0, cam.RightVector.Z)
     if forward.Magnitude > 0 then forward = forward.Unit end
     if right.Magnitude > 0 then right = right.Unit end
 
-    local horizontalInput = Vector3.zero
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then horizontalInput += forward end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then horizontalInput -= forward end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then horizontalInput += right end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then horizontalInput -= right end
-    if horizontalInput.Magnitude > 1 then horizontalInput = horizontalInput.Unit end
+    local direction = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then direction = direction + Vector3.new(0, 1, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then direction = direction - Vector3.new(0, 1, 0) end
 
-    local multiplier = 1
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-        or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
-        multiplier *= Options.FlyShiftMultiplier.Value or 1
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt)
-        or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt) then
-        multiplier *= 0.5
+    if direction.Magnitude > 0 then
+        direction = direction.Unit
     end
 
-    local flySpeed = Options.FlySpeed.Value * multiplier
-    local verticalInput = 0
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then verticalInput += 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then verticalInput -= 1 end
-
-    local targetVelocity = Vector3.new(
-        horizontalInput.X * flySpeed,
-        verticalInput * (Options.FlyVerticalSpeed.Value or 20) * multiplier,
-        horizontalInput.Z * flySpeed
-    )
-
-    local hasInput = horizontalInput.Magnitude > 0 or verticalInput ~= 0
-    local acceleration = hasInput and Options.FlyAcceleration.Value or Options.FlyDeceleration.Value
-    local currentVelocity = Globals.Active.FlyCurrentVelocity or root.AssemblyLinearVelocity
-    currentVelocity = MoveTowardsVector(currentVelocity, targetVelocity, acceleration * dt)
-
-    local travel = currentVelocity * dt
-    if travel.Magnitude > 0.01 then
-        local rayParams = Globals.Active.FlyRaycastParams
-        local hit = Workspace:Raycast(root.Position, travel.Unit * (travel.Magnitude + 2), rayParams)
-        if hit then
-            local intoWall = currentVelocity:Dot(hit.Normal)
-            if intoWall < 0 then
-                currentVelocity -= hit.Normal * intoWall
-            end
-        end
-    end
-
-    Globals.Active.FlyCurrentVelocity = currentVelocity
-    bodyVelocity.Velocity = currentVelocity
-
-    local facing = Vector3.new(cameraFrame.LookVector.X, 0, cameraFrame.LookVector.Z)
-    if facing.Magnitude > 0.001 then
-        local targetRotation = CFrame.lookAt(root.Position, root.Position + facing.Unit)
-        local turnAlpha = 1 - math.exp(-(Options.FlySmoothness.Value or 8) * dt)
-        bodyGyro.CFrame = bodyGyro.CFrame:Lerp(targetRotation, turnAlpha)
-    end
+    bodyVelocity.Velocity = direction * (Options.FlySpeed.Value or 20)
 end
 
 local function StartFly()
-    if Globals.Active.FlyLanding then
-        StopFly(true)
-    end
     if not Character or not RootPart or not Humanoid or Humanoid.Health <= 0 then return end
     if Globals.Active.Fly then return end
     if Globals.Active.FlyConnection then
@@ -583,29 +476,14 @@ local function StartFly()
     bodyVelocity.Name = "tokagod_FlyVelocity"
     bodyVelocity.MaxForce = Vector3.one * RootPart.AssemblyMass * 10000
     bodyVelocity.P = 2500
-    bodyVelocity.Velocity = RootPart.AssemblyLinearVelocity
+    bodyVelocity.Velocity = Vector3.zero
     bodyVelocity.Parent = RootPart
 
-    local bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.Name = "tokagod_FlyGyro"
-    bodyGyro.MaxTorque = Vector3.one * RootPart.AssemblyMass * 10000
-    bodyGyro.P = 2500
-    bodyGyro.D = 500
-    bodyGyro.CFrame = RootPart.CFrame
-    bodyGyro.Parent = RootPart
-
     table.insert(Globals.BodyObjects, bodyVelocity)
-    table.insert(Globals.BodyObjects, bodyGyro)
     Globals.Active.FlyVelocity = bodyVelocity
-    Globals.Active.FlyGyro = bodyGyro
     Globals.Active.FlyRootPart = RootPart
     Globals.Active.FlyHumanoid = Humanoid
-    Globals.Active.FlyCurrentVelocity = RootPart.AssemblyLinearVelocity
-    Globals.Active.FlyRaycastParams = RaycastParams.new()
-    Globals.Active.FlyRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    Globals.Active.FlyRaycastParams.FilterDescendantsInstances = { Character }
     Globals.Active.Fly = true
-    Globals.Active.FlyLanding = false
 
     Humanoid.PlatformStand = true
     Globals.Active.FlyConnection = Functions.ConnectSignal(RunService.RenderStepped, UpdateFly)
@@ -619,53 +497,17 @@ StopFly = function(immediate)
     local root = Globals.Active.FlyRootPart
     local humanoid = Globals.Active.FlyHumanoid
     local bodyVelocity = Globals.Active.FlyVelocity
-    local bodyGyro = Globals.Active.FlyGyro
 
     if Globals.Active.FlyDiedConnection then
         Globals.Active.FlyDiedConnection:Disconnect()
         Globals.Active.FlyDiedConnection = nil
     end
 
-    if not Globals.Active.Fly and not Globals.Active.FlyConnection then return end
+    if not Globals.Active.Fly and not Globals.Active.FlyConnection and not bodyVelocity then return end
     Globals.Active.Fly = false
     if Globals.Active.FlyConnection then
         Globals.Active.FlyConnection:Disconnect()
         Globals.Active.FlyConnection = nil
-    end
-
-    RemoveFlyObject(bodyGyro)
-    Globals.Active.FlyGyro = nil
-
-    if not immediate and root and root.Parent and humanoid and humanoid.Health > 0 and bodyVelocity then
-        Globals.Active.FlyLanding = true
-        Globals.Active.FlyCurrentVelocity = root.AssemblyLinearVelocity
-        bodyVelocity.Velocity = Globals.Active.FlyCurrentVelocity
-        humanoid.PlatformStand = true
-
-        Globals.Active.FlyConnection = Functions.ConnectSignal(RunService.Heartbeat, function(deltaTime)
-            if not root.Parent or humanoid.Health <= 0 then
-                FinishFlyLanding()
-                return
-            end
-
-            Globals.Active.FlyCurrentVelocity = MoveTowardsVector(
-                Globals.Active.FlyCurrentVelocity,
-                Vector3.new(0, -3, 0),
-                Options.FlyDeceleration.Value * deltaTime
-            )
-            bodyVelocity.Velocity = Globals.Active.FlyCurrentVelocity
-
-            local groundDistance = root.Size.Y * 0.5 + 2.5
-            local ground = Workspace:Raycast(
-                root.Position,
-                Vector3.new(0, -groundDistance, 0),
-                Globals.Active.FlyRaycastParams
-            )
-            if ground then
-                FinishFlyLanding()
-            end
-        end)
-        return
     end
 
     if bodyVelocity then bodyVelocity.Velocity = Vector3.zero end
@@ -674,9 +516,6 @@ StopFly = function(immediate)
     Globals.Active.FlyVelocity = nil
     Globals.Active.FlyRootPart = nil
     Globals.Active.FlyHumanoid = nil
-    Globals.Active.FlyCurrentVelocity = nil
-    Globals.Active.FlyRaycastParams = nil
-    Globals.Active.FlyLanding = false
 end
 
 Toggles.FlyToggle:OnChanged(function(Value)
@@ -686,85 +525,6 @@ end)
 -- ============================================
 -- ESP SYSTEM (перенесено из Abysall → вкладка Visuals)
 -- ============================================
-
-local ESP = {
-    Added = {},
-    Queue = {},
-    LastScan = 0,
-    LastPlayerScan = 0,
-    ScanInterval = 0.5,
-}
-
-local function EnqueueESPObject(Object)
-    if not Object then return end
-    ESP.Queue[Object] = true
-end
-
-local function IsEntitySelected(alias)
-    local EntityOptions = Options.EntityESPOptions
-    if not EntityOptions or not EntityOptions.Value then
-        return true
-    end
-
-    local selected = EntityOptions.Value
-    if type(selected) == "string" then
-        return selected == alias
-    end
-
-    if type(selected) == "table" then
-        if selected[alias] == true then
-            return true
-        end
-        for _, value in ipairs(selected) do
-            if value == alias then
-                return true
-            end
-        end
-    end
-
-    return false
-end
-
-local function AddESPForObject(Object, Text, Color)
-    if not Object then return nil end
-    local ok = pcall(function()
-        ESPLibrary:AddESP({
-            Object = Object,
-            Text = Text,
-            Color = Color,
-        })
-    end)
-    if ok then return Object end
-
-    if Object:IsA("Model") then
-        local primaryPart = Object.PrimaryPart or Object:FindFirstChildWhichIsA("BasePart", true)
-        if primaryPart then
-            local fallbackOk = pcall(function()
-                ESPLibrary:AddESP({
-                    Object = primaryPart,
-                    Text = Text,
-                    Color = Color,
-                })
-            end)
-            if fallbackOk then return primaryPart end
-        end
-    end
-
-    return nil
-end
-
-local function GetEntityESPTarget(Model)
-    if Model.Name == "MonumentEntity" then
-        local top = Model:FindFirstChild("Top")
-        if top and top:IsA("BasePart") then
-            return top
-        elseif top and top:IsA("Model") then
-            return top.PrimaryPart or top:FindFirstChildWhichIsA("BasePart", true)
-        end
-    end
-
-    return Model.PrimaryPart or Model:FindFirstChildWhichIsA("BasePart", true)
-end
 
 local Objects = {
     Entities = {},
@@ -776,6 +536,86 @@ local Objects = {
     Objectives = {},
     HidingSpots = {},
 }
+
+Functions.AddESP = function(ESPOptions, RoomBased)
+    local Object = ESPOptions.Object
+    if not Object or table.find(Globals.ESPBlacklist, Object) then return end
+    if RoomBased and Globals.ESPConnections[Object] then return end
+
+    local function AddObject()
+        pcall(function()
+            ESPLibrary:AddESP(ESPOptions)
+        end)
+    end
+
+    if RoomBased then
+        local CurrentRoom = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+        local ObjectRoom = tonumber(Object:GetAttribute("ParentRoom"))
+
+        if ObjectRoom == CurrentRoom
+            or (table.find(Objects.Doors, Object) and ObjectRoom == CurrentRoom + 1) then
+            AddObject()
+        end
+
+        local RoomConnection = LocalPlayer:GetAttributeChangedSignal("CurrentRoom"):Connect(function()
+            if ESPLibrary.ColorTable and ESPLibrary.ColorTable[Object] then
+                ESPOptions.Color = ESPLibrary.ColorTable[Object]
+            end
+            local NewCurrentRoom = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+            local ObjRoom = tonumber(Object:GetAttribute("ParentRoom"))
+            if ObjRoom == NewCurrentRoom
+                or (table.find(Objects.Doors, Object) and ObjRoom == NewCurrentRoom + 1) then
+                AddObject()
+            else
+                pcall(function()
+                    ESPLibrary:RemoveESP(Object)
+                end)
+            end
+        end)
+
+        table.insert(Globals.Connections, RoomConnection)
+        Globals.ESPConnections[Object] = RoomConnection
+        Object.Destroying:Once(function()
+            Functions.RemoveESP(Object)
+        end)
+    else
+        AddObject()
+    end
+end
+
+Functions.RemoveESP = function(Object)
+    local Connection = Globals.ESPConnections[Object]
+    if Connection then
+        Connection:Disconnect()
+        Globals.ESPConnections[Object] = nil
+        local Position = table.find(Globals.Connections, Connection)
+        if Position then table.remove(Globals.Connections, Position) end
+    end
+    pcall(function()
+        ESPLibrary:RemoveESP(Object)
+    end)
+end
+
+Functions.BlacklistESP = function(Object)
+    table.insert(Globals.ESPBlacklist, Object)
+end
+
+Functions.GetDoorNumber = function(Object)
+    local DoorNumber = tonumber(Object.Parent.Name) or tonumber(Object.Parent.Parent.Name)
+    if DoorNumber then DoorNumber = DoorNumber + 1 end
+    if Floor == "Mines" and DoorNumber then DoorNumber = DoorNumber + 100 end
+    if Floor == "Backdoor" and DoorNumber then DoorNumber = DoorNumber - 50 end
+    return tostring(DoorNumber)
+end
+
+local function EntityIsSelected(Alias)
+    local EntityOption = Options.EntityESPOptions
+    local Selected = EntityOption and EntityOption.Value
+    if not Selected then return false end
+    if type(Selected) ~= "table" then return Selected == Alias end
+    if Selected[Alias] == true then return true end
+    return table.find(Selected, Alias) ~= nil
+end
 
 -- === Справочники ===
 local ItemNames = {
@@ -805,63 +645,76 @@ local ItemNames = {
 }
 
 local Entities = {
-    ["StemsEntity"]={Alias="Balls"},
-    ["NoiseModel"]={Alias="Noise"},
-    ["Creak"]={Alias="Creak"},
-    ["DronesStampede"]={Alias="DronesStampede"},
-    ["TellerRig"]={Alias="Teller"},
-    ["Scribbles"]={Alias="Scribbles"},
-    ["BashMoving"]={Alias="Bash"},
-    ["RushMoving"]={Alias="Rush"},
-    ["AmbushMoving"]={Alias="Ambush"},
-    ["Eyes"]={Alias="Eyes"},
-    ["Lookman"]={Alias="Eyes"},
-    ["BackdoorRush"]={Alias="Blitz"},
-    ["BackdoorLookman"]={Alias="Lookman"},
-    ["Groundskeeper"]={Alias="Groundskeeper"},
-    ["A60"]={Alias="A-60"},
-    ["A120"]={Alias="A-120"},
-    ["GloombatSwarm"]={Alias="Gloombat Swarm"},
-    ["GlitchRush"]={Alias="RNIUSHCG=="},
-    ["GlitchAmbush"]={Alias="AR0xMBUSH"},
-    ["MandrakeHole"]={Alias="Mandrake Hole"},
-    ["GloombatEggs"]={Alias="Gloombat Eggs"},
-    ["GloombatEgg"]={Alias="Gloombat Eggs"},
-    ["MonumentEntity"]={Alias="Monument"},
-    ["JeffTheKiller"]={Alias="Jeff the Killer"},
-    ["CustomEntity"]={Alias="Custom Entity"},
-    ["FrozenAmbush"]={Alias="Frozen Ambush"},
-    ["SallyMoving"]={Alias="Sally"},
-    ["Snare"]={Alias="Snare"},
-    ["GiggleCeiling"]={Alias="Giggle"},
-    ["GrumbleRig"]={Alias="Grumble"},
-    ["LiveEntityBramble"]={Alias="Bramble"},
-    ["Figure"]={Alias="Figure"},
-    ["FigureRig"]={Alias="Figure"},
-    ["FigureRagdoll"]={Alias="Figure"},
-    ["DoorFake"]={Alias="Dupe"},
-    ["FakeDoor"]={Alias="Dupe"}
+    ["StemsEntity"] = { Alias = "Balls", NotifyMessage = { Title = "Balls", Body = "Balls." } },
+    ["NoiseModel"] = { Alias = "Noise", NotifyMessage = { Title = "Entity 'Noise' has spawned.", Body = "Dont let it touch you." } },
+    ["Creak"] = { Alias = "Creak", NotifyMessage = { Title = "Entity 'Creak' has spawned.", Body = "Dont touch him." } },
+    ["DronesStampede"] = { Alias = "DronesStampede", NotifyMessage = { Title = "Entity 'Drones Stampede' has spawned.", Body = "Find a hiding spot." } },
+    ["TellerRig"] = { Alias = "Teller", NotifyMessage = { Title = "Entity 'Teller' has spawned.", Body = "Dont worry, hes only annoying." } },
+    ["Scribbles"] = { Alias = "Scribbles", NotifyMessage = { Title = "Entity 'Scribbles' has spawned.", Body = "Find a hiding spot." } },
+    ["BashMoving"] = { Alias = "Bash", NotifyMessage = { Title = "Entity 'Bash' has spawned.", Body = "Find a hiding spot." } },
+    ["RushMoving"] = { Alias = "Rush", NotifyMessage = { Title = "Entity 'Rush' has spawned.", Body = "Find a hiding spot." } },
+    ["AmbushMoving"] = { Alias = "Ambush", NotifyMessage = { Title = "Entity 'Ambush' has spawned.", Body = "Find a hiding spot." } },
+    ["Eyes"] = { Alias = "Eyes", NotifyMessage = { Title = "Entity 'Eyes' has spawned.", Body = "Avoid looking at it." } },
+    ["Lookman"] = { Alias = "Eyes", NotifyMessage = { Title = "Entity 'Eyes' has spawned.", Body = "Avoid looking at it." } },
+    ["BackdoorRush"] = { Alias = "Blitz", NotifyMessage = { Title = "Entity 'Blitz' has spawned.", Body = "Find a hiding spot." } },
+    ["BackdoorLookman"] = { Alias = "Lookman", NotifyMessage = { Title = "Entity 'Lookman' has spawned.", Body = "Avoid looking at its eyes." } },
+    ["Groundskeeper"] = { Alias = "Groundskeeper", NotifyMessage = { Title = "Entity 'Groundskeeper' has spawned.", Body = "Avoid stepping on the grass." } },
+    ["A60"] = { Alias = "A-60", NotifyMessage = { Title = "Entity 'A-60' has spawned.", Body = "Find a hiding spot." } },
+    ["A120"] = { Alias = "A-120", NotifyMessage = { Title = "Entity 'A-120' has spawned.", Body = "Find a hiding spot." } },
+    ["GloombatSwarm"] = { Alias = "Gloombat Swarm", NotifyMessage = { Title = "Entity 'Gloombat Swarm' has spawned.", Body = "Keep all light sources turned off." } },
+    ["GlitchRush"] = { Alias = "RNIUSHCG==", NotifyMessage = { Title = "Entity 'RNIUSHCG==' has spawned.", Body = "Find a hiding spot." } },
+    ["GlitchAmbush"] = { Alias = "AR0xMBUSH", NotifyMessage = { Title = "Entity 'AR0xMBUSH' has spawned.", Body = "Find a hiding spot." } },
+    ["MonumentEntity"] = { Alias = "Monument", NotifyMessage = { Title = "Entity 'Monument' has spawned.", Body = "It can't move while you are looking at it." } },
+    ["JeffTheKiller"] = { Alias = "Jeff the Killer", NotifyMessage = { Title = "Entity 'Jeff the Killer' has spawned.", Body = "Avoid touching him." } },
+    ["CustomEntity"] = { Alias = "Custom Entity", NotifyMessage = { Title = "Entity 'Custom Entity' has spawned.", Body = "Find a hiding spot." } },
+    ["FrozenAmbush"] = { Alias = "Frozen Ambush", NotifyMessage = { Title = "Entity 'Frozen Ambush' has spawned.", Body = "Find a hiding spot." } },
+    ["SallyMoving"] = { Alias = "Sally", NotifyMessage = { Title = "Entity 'Sally' has spawned.", Body = "Find her horse and rop it." } },
+    ["MandrakeHole"] = { Alias = "Mandrake Hole" },
+    ["GloombatEggs"] = { Alias = "Gloombat Eggs" },
+    ["GloombatEgg"] = { Alias = "Gloombat Eggs" },
+    ["Snare"] = { Alias = "Snare" },
+    ["GiggleCeiling"] = { Alias = "Giggle" },
+    ["GrumbleRig"] = { Alias = "Grumble" },
+    ["LiveEntityBramble"] = { Alias = "Bramble" },
+    ["Figure"] = { Alias = "Figure" },
+    ["FigureRig"] = { Alias = "Figure" },
+    ["FigureRagdoll"] = { Alias = "Figure" },
+    ["DoorFake"] = { Alias = "Dupe" },
+    ["FakeDoor"] = { Alias = "Dupe" }
 }
 
-local function RefreshEntityESP()
-    for Object, category in pairs(ESP.Added) do
-        if category == "Entities" then
-            pcall(function()
-                ESPLibrary:RemoveESP(Object)
-            end)
-            ESP.Added[Object] = nil
-        end
-    end
+local EntityIcons = {
+    ["RushMoving"] = "rbxassetid://10716032262",
+    ["AmbushMoving"] = "rbxassetid://10110576663",
+    ["A60"] = "rbxassetid://12571092295",
+    ["A120"] = "rbxassetid://12711591665",
+    ["BackdoorRush"] = "rbxassetid://16602023490",
+    ["Eyes"] = "rbxassetid://10183704772",
+    ["Lookman"] = "rbxassetid://10183704772",
+    ["BackdoorLookman"] = "rbxassetid://16764872677",
+    ["GloombatSwarm"] = "rbxassetid://79221203116470",
+    ["Halt"] = "rbxassetid://11331795398",
+    ["JeffTheKiller"] = "rbxassetid://94479432156278",
+    ["GlitchRush"] = "rbxassetid://73859273102919",
+    ["GlitchAmbush"] = "rbxassetid://88369678433359",
+    ["SallyMoving"] = "rbxassetid://10840888070",
+    ["MonumentEntity"] = "rbxassetid://88933556873017",
+    ["Groundskeeper"] = "rbxassetid://114991380115557"
+}
 
-    if not Toggles.EntityESPToggle or not Toggles.EntityESPToggle.Value then return end
+local EntityESPLabels = {
+    JeffTheKiller = "Jeff the Killer", GiggleCeiling = "Giggle",
+    Snare = "Snare", GrumbleRig = "Grumble",
+    Drakobloxxer = "Drakobloxxer", Hole = "Mandrake Hole", Groundskeeper = "Groundskeeper",
+    LiveEntityBramble = "Bramble", Figure = "Figure", FigureRig = "Figure", FigureRagdoll = "Figure",
+    FakeDoor = "Dupe", DoorFake = "Dupe"
+}
 
-    for _, Model in ipairs(Objects.Entities) do
-        local entityData = Entities[Model.Name]
-        if Model.Parent and entityData and IsEntitySelected(entityData.Alias) then
-            EnqueueESPObject(Model)
-        end
-    end
-end
+local NodeEntities = {
+    Rush=true, Bash=true, Scribbles=true, DronesStampede=true, Ambush=true,
+    Eyes=true, Blitz=true, Lookman=true, ["A-60"]=true, ["A-120"]=true,
+    Sally=true, ["Jeff The Killer"]=true, Monument=true, ["AR0xMBUSH"]=true, ["RNIUSHCG=="]=true
+}
 
 local HidingSpotLabels = {
     Wardrobe="Closet",["Backdoor_Wardrobe"]="Closet",Toolshed="Closet",
@@ -891,13 +744,52 @@ local ObjectiveLabels = {
     VineGuillotine="Vine Lever"
 }
 
--- === Классификатор объекта ===
-local function ClassifyObject(Object)
+local AllowedInstances = {
+    Lava=true, GoldPile=true, KeyObtain=true, Drakobloxxer=true, FuseObtain=true,
+    MinesGenerator=true, JeffTheKiller=true, Snare=true, FakeDoor=true, DoorFake=true, SideroomSpace=true,
+    ChestBox=true, ChestBoxLocked=true, Chest_Vine=true, Locker_Small_Locked=true, Toolbox=true,
+    Toolbox_Locked=true, Wardrobe=true, ["Wardrobe-FOOLS26"]=true, Toolshed=true, Toolshed_Small=true,
+    Bed=true, MinesAnchor=true, Double_Bed=true, RetroWardrobe=true, Backdoor_Wardrobe=true,
+    Rooms_Locker=true, Rooms_Locker_Fridge=true, Locker_Large=true, FigureRig=true, FigureRagdoll=true,
+    TimerLever=true, Lever=true, Seek_Arm=true, ChandelierObstruction=true, ScaryWall=true, Ladder=true,
+    CircularVent=true, Dumpster=true, SquareGrate=true, TriggerEventCollision=true, GrumbleRig=true,
+    GiggleCeiling=true, MinesGateButton=true, ElectricalKeyObtain=true, LibraryHintPaper=true,
+    WaterPump=true, CringlePresent=true, Wheel=true, PickupItem=true, LiveHintBook=true,
+    LiveBreakerPolePickup=true, LeverForGate=true, GloomPile=true, SeekFloodline=true, Door=true,
+    Green_Herb=true, Bridge=true, MouseHole=true, BananaPeel=true, NannerPeel=true, PowerupPad=true,
+    IndustrialGate=true, CollisionFloor=true, ElevatorCar=true, Wax_Door=true, ThingToOpen=true,
+    MovingDoor=true, StardustPickup=true, Hole=true, Groundskeeper=true, MandrakeLive=true,
+    GardenGateButton=true, LotusPetalPickup=true, VineGuillotine=true, LiveEntityBramble=true, ArchivesFihTank=true,
+    RiftSpawn=true, ElevatorBreaker=true, RunnerNodes=true, PathLights=true, DuckBoard=true,
+    Padlock=true, EyestalkEndCutscene=true, MinecartRig=true, SeekMovingNewClone=true, Cellar=true, ArchivesPackageDeposit=true, SalvageChute=true,
+    StairwellFireAlarm=true, ShoppingCart=true
+}
+
+local function TrackObject(ObjectList, Object)
+    if table.find(ObjectList, Object) then return false end
+    table.insert(ObjectList, Object)
+    Object.Destroying:Once(function()
+        local index = table.find(ObjectList, Object)
+        if index then table.remove(ObjectList, index) end
+        Functions.RemoveESP(Object)
+    end)
+    return true
+end
+
+Functions.HandleObject = function(Object)
     local Name = Object.Name
 
-    -- Door — берём структуру из Abysall (HighlightModel + weld к Door.Door)
+    if CurrentRooms then
+        for _, Room in CurrentRooms:GetChildren() do
+            if Object:IsDescendantOf(Room) then
+                Object:SetAttribute("ParentRoom", tonumber(Room.Name))
+                break
+            end
+            task.wait()
+        end
+    end
+
     if Name == "Door" and Object:IsA("Model") and Object.Parent and tonumber(Object.Parent.Name) then
-        -- Логика из Abysall 1-в-1
         local DoorParts = {}
         for _, Child in Object:GetChildren() do
             if Child.Name == "Door" and Child:IsA("BasePart") then
@@ -912,8 +804,7 @@ local function ClassifyObject(Object)
             if not HighlightModel then
                 HighlightModel = Instance.new("Model", Object)
                 HighlightModel.Name = "HighlightModel"
-                local hum = Instance.new("Humanoid", HighlightModel)
-                hum.Name = "HighlightHumanoid"
+                Instance.new("Humanoid", HighlightModel).Name = "HighlightHumanoid"
                 HighlightModel:SetAttribute("ParentRoom", tonumber(Object.Parent.Name))
 
                 for _, DoorPart in DoorParts do
@@ -936,7 +827,7 @@ local function ClassifyObject(Object)
             if not HP then
                 local Root = Object:WaitForChild("Door", 9)
                 if not Root or not Root:IsA("BasePart") then
-                    return nil, nil, nil
+                    return
                 end
                 HP = Instance.new("Part", Object)
                 HP.Transparency = 0.999
@@ -953,204 +844,134 @@ local function ClassifyObject(Object)
             target = HP
         end
 
-        return "Doors", "Door " .. tostring(tonumber(Object.Parent.Name) + 1), target
-    end
-
-    if ObjectiveLabels[Name] then
-        return "Objectives", ObjectiveLabels[Name], Object
-    end
-
-    if HidingSpotLabels[Name] then
-        return "HidingSpots", HidingSpotLabels[Name], Object
-    end
-    if typeof(Name) == "string" and string.find(string.lower(Name), "hidingspot") then
-        return "HidingSpots", "Hiding Spot", Object
-    end
-
-    if ChestLabels[Name] then
-        return "Chests", ChestLabels[Name], Object
-    end
-
-    if ItemNames[Name] and Object:FindFirstChild("ModulePrompt") then
-        return "Items", ItemNames[Name], Object
-    end
-    if Name == "Green_Herb" then
-        return "Items", "Green Herb", Object
-    end
-
-    if Name == "GoldPile" and Object:GetAttribute("GoldValue") then
-        return "Currency", "Gold Pile [" .. Object:GetAttribute("GoldValue") .. "]", Object
-    end
-    if Name == "StardustPickup" then
-        return "Currency", "Stardust Pile", Object
-    end
-
-    if Name == "Ladder" then
-        return "Ladders", "Ladder", Object
-    end
-
-    if Entities[Name] then
-        return "Entities", Entities[Name].Alias, GetEntityESPTarget(Object)
-    end
-
-    return nil, nil, nil
-end
-
-local ESPToggleMap = {
-    Doors       = "DoorESPToggle",
-    HidingSpots = "HidingSpotESPToggle",
-    Chests      = "ChestESPToggle",
-    Items       = "ItemESPToggle",
-    Currency    = "CurrencyESPToggle",
-    Ladders     = "LadderESPToggle",
-    Objectives  = "ObjectiveESPToggle",
-    Entities    = "EntityESPToggle",
-}
-
-local ESPColorMap = {
-    Doors       = "DoorESPColor",
-    HidingSpots = "HidingSpotESPColor",
-    Chests      = "ChestESPColor",
-    Items       = "ItemESPColor",
-    Currency    = "CurrencyESPColor",
-    Ladders     = "LadderESPColor",
-    Objectives  = "ObjectiveESPColor",
-    Entities    = "EntityESPColor",
-}
-
--- === Основной цикл сканирования ===
-local function ScanAndUpdate()
-    local seen = {}
-
-    for Object in pairs(ESP.Added) do
-        seen[Object] = true
-    end
-
-    for Object in pairs(ESP.Queue) do
-        ESP.Queue[Object] = nil
-
-        local category, label, target = ClassifyObject(Object)
-        if category and target then
-            seen[target] = true
-
-            local toggleName = ESPToggleMap[category]
-            local colorName  = ESPColorMap[category]
-            local isOn = Toggles[toggleName] and Toggles[toggleName].Value
-
-            if isOn and category == "Entities" then
-                if not IsEntitySelected(label) then
-                    isOn = false
-                end
-            end
-            if isOn and not ESP.Added[target] then
-                local ok = pcall(function()
-                    ESPLibrary:AddESP({
-                        Object = target,
-                        Text = label,
-                        Color = Options[colorName].Value,
-                    })
-                end)
-                if ok then
-                    ESP.Added[target] = category
-                end
-            elseif not isOn and ESP.Added[target] then
-                pcall(function() ESPLibrary:RemoveESP(target) end)
-                ESP.Added[target] = nil
-            end
+        if TrackObject(Objects.Doors, target) and Toggles.DoorESPToggle.Value then
+            Functions.AddESP({
+                Object = target,
+                Text = "Door " .. Functions.GetDoorNumber(Object),
+                Color = Options.DoorESPColor.Value,
+            }, true)
         end
-    end
-
-    for Object in pairs(ESP.Added) do
-        if not seen[Object] or not Object.Parent then
-            pcall(function() ESPLibrary:RemoveESP(Object) end)
-            ESP.Added[Object] = nil
+    elseif Name == "ChestBox" or Name == "ChestBoxLocked" then
+        if TrackObject(Objects.Chests, Object) and Toggles.ChestESPToggle.Value then
+            local Label = Object:GetAttribute("Locked") and "Locked Chest" or "Chest"
+            Functions.AddESP({ Object = Object, Text = Label, Color = Options.ChestESPColor.Value }, true)
+        end
+    elseif Name == "Toolbox" or Name == "Toolbox_Locked" then
+        if TrackObject(Objects.Chests, Object) and Toggles.ChestESPToggle.Value then
+            local Label = Object:GetAttribute("Locked") and "Locked Toolbox" or "Toolbox"
+            Functions.AddESP({ Object = Object, Text = Label, Color = Options.ChestESPColor.Value }, true)
+        end
+    elseif Name == "Chest_Vine" or Name == "Toolshed_Small" or Name == "Locker_Small_Locked" or Name == "MouseHole" then
+        if TrackObject(Objects.Chests, Object) and Toggles.ChestESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = ChestLabels[Name], Color = Options.ChestESPColor.Value }, true)
+        end
+    elseif ItemNames[Name] and Object:FindFirstChild("ModulePrompt") then
+        if TrackObject(Objects.Items, Object) and Toggles.ItemESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = ItemNames[Name], Color = Options.ItemESPColor.Value }, Object:GetAttribute("ParentRoom") ~= nil)
+        end
+    elseif Name == "Green_Herb" then
+        if TrackObject(Objects.Items, Object) and Toggles.ItemESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = "Green Herb", Color = Options.ItemESPColor.Value }, true)
+        end
+    elseif Name == "GoldPile" and Object:GetAttribute("GoldValue") then
+        if TrackObject(Objects.Currency, Object) and Toggles.CurrencyESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = "Gold Pile [" .. Object:GetAttribute("GoldValue") .. "]", Color = Options.CurrencyESPColor.Value }, true)
+        end
+    elseif Name == "StardustPickup" then
+        if TrackObject(Objects.Currency, Object) and Toggles.CurrencyESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = "Stardust Pile", Color = Options.CurrencyESPColor.Value }, true)
+        end
+    elseif Name == "Ladder" then
+        if TrackObject(Objects.Ladders, Object) and Toggles.LadderESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = "Ladder", Color = Options.LadderESPColor.Value }, true)
+        end
+    elseif ObjectiveLabels[Name] then
+        if TrackObject(Objects.Objectives, Object) and Toggles.ObjectiveESPToggle.Value then
+            Functions.AddESP({ Object = Object, Text = ObjectiveLabels[Name], Color = Options.ObjectiveESPColor.Value }, true)
+        end
+    elseif HidingSpotLabels[Name] or string.find(string.lower(Name), "hidingspot") then
+        if TrackObject(Objects.HidingSpots, Object) and Toggles.HidingSpotESPToggle.Value then
+            local Label = HidingSpotLabels[Name] or "Hiding Spot"
+            Functions.AddESP({ Object = Object, Text = Label, Color = Options.HidingSpotESPColor.Value }, true)
         end
     end
 end
 
-Functions.ConnectSignal(RunService.Heartbeat, function()
-    if tick() - ESP.LastScan < ESP.ScanInterval then return end
-    ESP.LastScan = tick()
-    ScanAndUpdate()
-end)
+Functions.QueueObject = function(Object)
+    if not Object or not Object.Parent then return end
+    local Name = Object.Name
+    local IsHidingSpot = string.find(string.lower(Name), "hidingspot") ~= nil
+    local IsAllowed = IsHidingSpot
+        or AllowedInstances[Name]
+        or Object.ClassName == "ProximityPrompt"
+        or Object.Parent == CurrentRooms
+        or ItemNames[Name] ~= nil
+
+    if IsAllowed and not table.find(Globals.ObjectQueue, Object) then
+        table.insert(Globals.ObjectQueue, Object)
+    end
+end
 
 -- === Обработчик спавна сущностей (1-в-1 из Abysall) ===
 local RusherAliases = {
     Rush=true, Bash=true, Scribbles=true, DronesStampede=true, Ambush=true,
     Eyes=true, Lookman=true, Blitz=true, ["A-60"]=true, ["A-120"]=true,
-    ["AR0xMBUSH"]=true, ["RNIUSHCG=="]=true, ["Custom Entity"]=true
+    ["AR0xMBUSH"]=true, ["RNIUSHCG=="]=true
 }
 
 local function HandleEntitySpawn(Entity)
     if not Entity or typeof(Entity) ~= "Instance" then return end
 
     local Model = Entity
-    if Entity:IsA("Humanoid") then
-        Model = Entity.Parent
-    end
-    while Model and (not Model:IsA("Model") or not Entities[Model.Name]) do
-        Model = Model.Parent
-    end
-    if not Model then return end
+    if Entity:IsA("Humanoid") then Model = Entity.Parent end
+    if not Model or not Model:IsA("Model") then return end
 
     local EntityData = Entities[Model.Name]
     if not EntityData then return end
-    if Model:GetAttribute("tokagod_EntityHandled") then return end
-    Model:SetAttribute("tokagod_EntityHandled", true)
-    print("Entity spawn:", Model.Name)
+    if Model:GetAttribute("Abysall_EntityHandled") then return end
+    Model:SetAttribute("Abysall_EntityHandled", true)
 
-    local start = tick()
     while not Model.PrimaryPart do
-        for _, Child in Model:GetDescendants() do
+        for _, Child in Model:GetChildren() do
             if Child:IsA("BasePart") then Model.PrimaryPart = Child end
         end
-        if tick() - start > 5 then break end
-        if not Model.PrimaryPart then task.wait(0.05) end
+        if not Model.PrimaryPart then task.wait() end
     end
     task.wait(0.1)
 
-    if not Model.PrimaryPart then
-        Model:SetAttribute("tokagod_EntityHandled", nil)
-        warn("Entity has no BasePart:", Model.Name)
-        return
-    end
-    if LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
+    if not Model.PrimaryPart or LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
 
     local Alias = EntityData.Alias
     local RealAlias = Alias
 
-    -- Уведомление (только если включён NotifyEntities — но у нас его нет, пропускаем)
+    if Model.Name ~= "GloombatSwarm" then
+        if Toggles.EntityESPToggle.Value and EntityIsSelected(RealAlias) then
+            if Model.Name == "MonumentEntity" then
+                Functions.AddESP({ Object = Model.Top, Text = Alias, Color = Options.EntityESPColor.Value })
+            else
+                Functions.AddESP({ Object = Model, Text = Alias, Color = Options.EntityESPColor.Value })
+            end
+        end
+        table.insert(Objects.Entities, Model)
+    end
 
-    table.insert(Objects.Entities, Model)
     Model.Destroying:Once(function()
         local index = table.find(Objects.Entities, Model)
         if index then
             table.remove(Objects.Entities, index)
         end
-
-        local target = GetEntityESPTarget(Model)
-        if target and ESP.Added[target] == "Entities" then
-            pcall(function()
-                ESPLibrary:RemoveESP(target)
-            end)
-            ESP.Added[target] = nil
+        Functions.RemoveESP(Model)
+        if Model.Name == "MonumentEntity" and Model:FindFirstChild("Top") then
+            Functions.RemoveESP(Model.Top)
         end
-        ESP.Queue[Model] = nil
+        local queueIndex = table.find(Globals.ObjectQueue, Model)
+        if queueIndex then table.remove(Globals.ObjectQueue, queueIndex) end
     end)
 
-    if Toggles.EntityESPToggle.Value and IsEntitySelected(RealAlias) then
-        EnqueueESPObject(Model)
-    end
-
     if RusherAliases[EntityData.Alias] then
-        if not Model:FindFirstChild("HighlightHumanoid") then
-            Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
-        end
+        Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
         local Root = Model.PrimaryPart
-        if Root then
-            Root.Transparency = 0.999
-            Root.Material = Enum.Material.Plastic
-        end
+        if Root then Root.Transparency = 0.999 Root.Material = Enum.Material.Plastic end
     end
 
     if Model.Name == "Lookman" then
@@ -1165,43 +986,43 @@ Functions.ConnectSignal(Workspace.ChildAdded, function(Child)
 end)
 
 Functions.ConnectSignal(Workspace.DescendantAdded, function(Descendant)
-    EnqueueESPObject(Descendant)
-    task.defer(function()
-        HandleEntitySpawn(Descendant)
-    end)
+    local EntityModel = Descendant:IsA("Humanoid") and Descendant.Parent or Descendant
+    if EntityModel and EntityModel:IsA("Model") and Entities[EntityModel.Name] then
+        task.defer(function() HandleEntitySpawn(Descendant) end)
+    end
 end)
 
--- === Player ESP (отдельно) ===
 local function UpdatePlayerESP()
-    for _, Player in Players:GetPlayers() do
-        if Player ~= LocalPlayer and Player.Character then
-            local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
-            if HRP then
-                local isOn = Toggles.PlayerESPToggle.Value
-                local isAdded = ESP.Added[HRP]
-                if isOn and not isAdded then
-                    local ok = pcall(function()
-                        ESPLibrary:AddESP({
-                            Object = HRP,
-                            Text = Player.Name,
-                            Color = Options.PlayerESPColor.Value,
-                        })
-                    end)
-                    if ok then ESP.Added[HRP] = "Players" end
-                elseif not isOn and isAdded then
-                    pcall(function() ESPLibrary:RemoveESP(HRP) end)
-                    ESP.Added[HRP] = nil
-                end
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer then
+            local CharacterModel = Player.Character
+            if CharacterModel and Toggles.PlayerESPToggle.Value then
+                Functions.AddESP({ Object = CharacterModel, Text = Player.Name, Color = Options.PlayerESPColor.Value })
+            elseif CharacterModel then
+                Functions.RemoveESP(CharacterModel)
             end
         end
     end
 end
 
-Functions.ConnectSignal(RunService.Heartbeat, function()
-    if tick() - ESP.LastPlayerScan < 0.5 then return end
-    ESP.LastPlayerScan = tick()
-    UpdatePlayerESP()
-end)
+local function TrackPlayer(Player)
+    if Player == LocalPlayer then return end
+
+    local CharacterConnection = Functions.ConnectSignal(Player.CharacterAdded, function(NewCharacter)
+        if Toggles.PlayerESPToggle.Value then
+            Functions.AddESP({ Object = NewCharacter, Text = Player.Name, Color = Options.PlayerESPColor.Value })
+        end
+    end)
+    local DeadConnection = Functions.ConnectSignal(Player:GetAttributeChangedSignal("Alive"), function()
+        if Player:GetAttribute("Alive") ~= true and Player.Character then
+            Functions.RemoveESP(Player.Character)
+        end
+    end)
+    Player.Destroying:Once(function()
+        CharacterConnection:Disconnect()
+        DeadConnection:Disconnect()
+    end)
+end
 
 -- ============================================
 -- ESP UI (внутри Visuals)
@@ -1232,8 +1053,162 @@ Groupboxes.Visuals_ESP:AddDropdown("EntityESPOptions", {
     AllowNull = true,
 })
 Groupboxes.Visuals_ESP:AddToggle("EntityESPToggle",     { Text = "Entities", Default = false })
-Toggles.EntityESPToggle:OnChanged(RefreshEntityESP)
-Options.EntityESPOptions:OnChanged(RefreshEntityESP)
+Toggles.DoorESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Doors) do
+        if Value then
+            Functions.AddESP({
+                Object = Object,
+                Text = "Door " .. Functions.GetDoorNumber(Object),
+                Color = Options.DoorESPColor.Value,
+            }, true)
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.ChestESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Chests) do
+        if Value then
+            local Label
+            if Object.Name == "ChestBox" or Object.Name == "ChestBoxLocked" then
+                Label = Object:GetAttribute("Locked") and "Locked Chest" or "Chest"
+            elseif Object.Name == "Toolbox" or Object.Name == "Toolbox_Locked" then
+                Label = Object:GetAttribute("Locked") and "Locked Toolbox" or "Toolbox"
+            else
+                Label = ChestLabels[Object.Name]
+            end
+            if Label then
+                Functions.AddESP({ Object = Object, Text = Label, Color = Options.ChestESPColor.Value }, true)
+            end
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.ItemESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Items) do
+        if Value then
+            local Label = Object.Name == "Green_Herb" and "Green Herb" or ItemNames[Object.Name]
+            if Label then Functions.AddESP({ Object = Object, Text = Label, Color = Options.ItemESPColor.Value }, true) end
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.CurrencyESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Currency) do
+        if Value then
+            local Label = Object.Name == "GoldPile"
+                and ("Gold Pile [" .. Object:GetAttribute("GoldValue") .. "]")
+                or "Stardust Pile"
+            Functions.AddESP({ Object = Object, Text = Label, Color = Options.CurrencyESPColor.Value }, true)
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.LadderESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Ladders) do
+        if Value then
+            Functions.AddESP({ Object = Object, Text = "Ladder", Color = Options.LadderESPColor.Value }, true)
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.ObjectiveESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Objectives) do
+        if Value then
+            local Label = ObjectiveLabels[Object.Name]
+            if Label then Functions.AddESP({ Object = Object, Text = Label, Color = Options.ObjectiveESPColor.Value }, true) end
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+Toggles.HidingSpotESPToggle:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.HidingSpots) do
+        if Value then
+            local Label = HidingSpotLabels[Object.Name] or "Hiding Spot"
+            Functions.AddESP({ Object = Object, Text = Label, Color = Options.HidingSpotESPColor.Value }, true)
+        else
+            Functions.RemoveESP(Object)
+        end
+    end
+end)
+
+local function UpdateEntitySelection()
+    for _, Object in ipairs(Objects.Entities) do
+        local Label = EntityESPLabels[Object.Name] or (Entities[Object.Name] and Entities[Object.Name].Alias)
+        local ESPObject = Object.Name == "MonumentEntity" and Object:FindFirstChild("Top") or Object
+        if Toggles.EntityESPToggle.Value and Label and EntityIsSelected(Label) then
+            Functions.AddESP({ Object = ESPObject, Text = Label, Color = Options.EntityESPColor.Value }, NodeEntities[Label] ~= true)
+        else
+            Functions.RemoveESP(ESPObject)
+        end
+    end
+end
+
+Toggles.EntityESPToggle:OnChanged(UpdateEntitySelection)
+Options.EntityESPOptions:OnChanged(UpdateEntitySelection)
+Toggles.PlayerESPToggle:OnChanged(UpdatePlayerESP)
+Options.DoorESPColor:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Doors) do
+        pcall(function()
+            ESPLibrary:UpdateObjectColor(Object, Value)
+        end)
+    end
+end)
+
+for _, Player in ipairs(Players:GetPlayers()) do
+    TrackPlayer(Player)
+end
+Functions.ConnectSignal(Players.PlayerAdded, function(Player)
+    TrackPlayer(Player)
+    if Player.Character and Toggles.PlayerESPToggle.Value then
+        Functions.AddESP({ Object = Player.Character, Text = Player.Name, Color = Options.PlayerESPColor.Value })
+    end
+end)
+UpdatePlayerESP()
+
+local function CleanObjectList(ObjectList)
+    for index = #ObjectList, 1, -1 do
+        local Object = ObjectList[index]
+        if not Object or not Object.Parent then
+            if Object then Functions.RemoveESP(Object) end
+            table.remove(ObjectList, index)
+        end
+    end
+end
+
+Functions.ConnectSignal(RunService.Heartbeat, function()
+    CleanObjectList(Objects.Entities)
+    CleanObjectList(Objects.Doors)
+    CleanObjectList(Objects.Items)
+    CleanObjectList(Objects.Chests)
+    CleanObjectList(Objects.Currency)
+    CleanObjectList(Objects.Ladders)
+    CleanObjectList(Objects.Objectives)
+    CleanObjectList(Objects.HidingSpots)
+end)
+
+Globals.Active.InstanceHandler = Functions.ConnectSignal(Workspace.DescendantAdded, Functions.QueueObject)
+Globals.Active.QueueConnection = Functions.ConnectSignal(RunService.RenderStepped, function()
+    local Object = table.remove(Globals.ObjectQueue, 1)
+    if Object then Functions.HandleObject(Object) end
+end)
+
+for _, Object in Workspace:GetDescendants() do
+    task.spawn(function()
+        Functions.QueueObject(Object)
+    end)
+end
 
 Toggles.ObjectiveESPToggle:AddColorPicker("ObjectiveESPColor", { Text = "Objectives", Default = Color3.fromRGB(0,255,0), Transparency = 0 })
 Toggles.DoorESPToggle:AddColorPicker("DoorESPColor",           { Text = "Doors", Default = Color3.fromRGB(0,200,255), Transparency = 0 })
@@ -1277,25 +1252,38 @@ Options.ESPFadeTime:OnChanged(function(V) ESPLibrary:SetFadeTime(V) end)
 Options.ESPRenderLimit:OnChanged(function(V) ESPLibrary:SetRenderLimit(V) end)
 Options.ESPTextSize:OnChanged(function(V) ESPLibrary:SetTextSize(V) end)
 
--- === Изменение цвета → обновление уже подсвеченных ===
-for category, colorName in pairs(ESPColorMap) do
-    if Options[colorName] then
-        Options[colorName]:OnChanged(function(newColor)
-            for Object, cat in pairs(ESP.Added) do
-                if cat == category then
-                    pcall(function() ESPLibrary:UpdateObjectColor(Object, newColor) end)
-                end
-            end
+local function UpdateESPColor(ObjectList, Color)
+    for _, Object in ipairs(ObjectList) do
+        pcall(function()
+            ESPLibrary:UpdateObjectColor(Object, Color)
         end)
     end
 end
 
+Options.DoorESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Doors, Value) end)
+Options.ChestESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Chests, Value) end)
+Options.ItemESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Items, Value) end)
+Options.CurrencyESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Currency, Value) end)
+Options.LadderESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Ladders, Value) end)
+Options.ObjectiveESPColor:OnChanged(function(Value) UpdateESPColor(Objects.Objectives, Value) end)
+Options.HidingSpotESPColor:OnChanged(function(Value) UpdateESPColor(Objects.HidingSpots, Value) end)
+Options.EntityESPColor:OnChanged(function(Value)
+    for _, Object in ipairs(Objects.Entities) do
+        local ESPObject = Object.Name == "MonumentEntity" and Object:FindFirstChild("Top") or Object
+        pcall(function() ESPLibrary:UpdateObjectColor(ESPObject, Value) end)
+    end
+end)
+
 -- === Очистка при Unload ===
 Library:OnUnload(function()
-    for Object in pairs(ESP.Added) do
-        pcall(function() ESPLibrary:RemoveESP(Object) end)
+    for _, ObjectList in ipairs({
+        Objects.Entities, Objects.Doors, Objects.Items, Objects.Chests,
+        Objects.Currency, Objects.Ladders, Objects.Objectives, Objects.HidingSpots,
+    }) do
+        for _, Object in ipairs(ObjectList) do
+            Functions.RemoveESP(Object)
+        end
     end
-    ESP.Added = {}
 end)
 
 -- ============================================
